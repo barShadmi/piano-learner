@@ -277,6 +277,16 @@ export default function Sound() {
           {beep}
         </p>
       </section>
+
+      <section className={styles.panel} aria-labelledby="delay-title">
+        <h2 className={styles.sectionTitle} id="delay-title">
+          Delay
+        </h2>
+        <p className={styles.note}>See how long a key takes to sound on this PC.</p>
+        <a href="#/latency" className="button">
+          Test the delay
+        </a>
+      </section>
     </main>
   )
 }

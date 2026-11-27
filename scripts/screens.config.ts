@@ -2,5 +2,6 @@
 // An empty hash means the normal start page.
 export const screens: { name: string; hash: string }[] = [
   { name: 'library', hash: '' },
-  { name: 'sound', hash: 'sound' }
+  { name: 'sound', hash: 'sound' },
+  { name: 'latency', hash: 'latency' }
 ]

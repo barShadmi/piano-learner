@@ -31,3 +31,4 @@ Acceptance: npm test, lint, build, e2e pass; screenshots light and dark of the D
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
 | 1 | builder-plus (Sonnet) | 1 | PASS. The estimate errs high (WASAPI exclusive: buffer + stream latency; cpal: measured delay). |
+| 2 | builder (Haiku) | 2 | FAIL (timings cleared before restart, flaky Tab e2e), then PASS. Flaky Tab tests now wait for window focus. |

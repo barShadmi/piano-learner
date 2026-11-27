@@ -23,3 +23,14 @@ describe('screenFor sound', () => {
     expect(screenFor('#/sound/x')).toBe('not-found')
   })
 })
+
+describe('screenFor latency', () => {
+  it('shows the delay test for #/latency', () => {
+    expect(screenFor('#/latency')).toBe('latency')
+  })
+
+  it('does not match look-alikes', () => {
+    expect(screenFor('#/latency/x')).toBe('not-found')
+    expect(screenFor('#/latencies')).toBe('not-found')
+  })
+})

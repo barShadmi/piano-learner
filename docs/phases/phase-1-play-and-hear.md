@@ -7,7 +7,7 @@ Tags: (B) builder, (B+) builder-plus, (L) lead. `hard` steps go straight to buil
 - [x] MIDI input in the engine: P-121 found, notes, velocity, sustain pedal (B+, hard)
 - [x] Sampled grand piano in memory, velocity layers, pedal (B+, hard)
 - [x] Local Control off on start, restored on exit (B+)
-- [ ] Latency test and report, target under 10 ms (B+, hard)
+- [x] Latency test and report, target under 10 ms (B+, hard)
 - [ ] Settings: output device, driver, buffer size, volume; headphones by default (B) [frontend-design]
 - [ ] 88-key virtual keyboard that lights the keys you press (B) [frontend-design]
 - [ ] Falling notes view at 60 fps, a colour per hand (B+) [frontend-design, animate]

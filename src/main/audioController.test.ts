@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createAudioController, type Engine, type MidiEngine } from './audioController'
 import type { MidiEvent, MidiStatus, StartResult } from '../shared/audio'
-import type { PianoEngine } from './audioController'
+import type { PianoEngine, LatencyEngine } from './audioController'
+import type { LatencySummary } from '../shared/latency'
 
 const goodResult: StartResult = {
   backend: 'wasapi-exclusive',
@@ -362,5 +363,134 @@ describe('createAudioController piano sound', () => {
     expect(c.state().piano).toBe('failed')
     await expect(c.loadPiano('/p')).resolves.toBeUndefined()
     expect(c.state().pianoError).toMatch(/\.$/)
+  })
+})
+
+const summary: LatencySummary = {
+  count: 20,
+  medianMs: 4.2,
+  p95Ms: 5.1,
+  maxMs: 6,
+  outputMs: 2.7,
+  bufferFrames: 128,
+  sampleRate: 48000,
+  backend: 'wasapi-exclusive',
+  underruns: 0
+}
+
+function fakeLatency(over: Partial<LatencyEngine> = {}) {
+  const latency = {
+    clears: 0,
+    summaryCalls: 0,
+    latencySummary: (): LatencySummary => {
+      latency.summaryCalls++
+      return summary
+    },
+    clearLatency() {
+      latency.clears++
+    },
+    ...over
+  }
+  return latency
+}
+
+describe('createAudioController delay test', () => {
+  it('answers the delay summary from the engine', () => {
+    const c = createAudioController({ engine: { ...fakeEngine(), ...fakeLatency() } })
+    expect(c.latencySummary()).toEqual({ ok: true, summary: summary })
+  })
+
+  it('says the delay part is missing when the engine has none', () => {
+    const c = createAudioController({ engine: fakeEngine() })
+    expect(c.latencySummary()).toEqual({ ok: false, error: expect.any(String) })
+    expect(c.clearLatency()).toEqual({ ok: false, error: expect.any(String) })
+  })
+
+  it('refuses a summary with a number that is not a number, in plain words', () => {
+    const c = createAudioController({
+      engine: { ...fakeEngine(), ...fakeLatency({ latencySummary: () => ({ ...summary, p95Ms: Number.NaN }) }) }
+    })
+    expect(c.latencySummary()).toEqual({ ok: false, error: 'The delay numbers could not be read.' })
+  })
+
+  it('turns an error from the engine into a plain reply', () => {
+    const c = createAudioController({
+      engine: {
+        ...fakeEngine(),
+        ...fakeLatency({
+          latencySummary: () => {
+            throw new Error('Broken.')
+          }
+        })
+      }
+    })
+    expect(c.latencySummary()).toEqual({ ok: false, error: 'Broken.' })
+  })
+
+  it('clears the remembered delays when the engine is asked to', () => {
+    const latency = fakeLatency()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...latency } })
+    expect(c.clearLatency()).toEqual({ ok: true })
+    expect(latency.clears).toBe(1)
+  })
+
+  it('clears the remembered delays before and after every start, so no report mixes two settings', async () => {
+    const order: string[] = []
+    const engine = {
+      ...fakeEngine({
+        start: async () => {
+          order.push('start')
+          return goodResult
+        }
+      }),
+      ...fakeLatency({
+        clearLatency() {
+          order.push('clear')
+        }
+      })
+    }
+    const c = createAudioController({ engine })
+    await c.start({})
+    expect(order).toEqual(['clear', 'start', 'clear'])
+  })
+
+  it('clears the remembered delays after a start that fails too', async () => {
+    const order: string[] = []
+    const engine = {
+      ...fakeEngine({
+        start: async () => {
+          order.push('start')
+          throw new Error('Device busy.')
+        }
+      }),
+      ...fakeLatency({
+        clearLatency() {
+          order.push('clear')
+        }
+      })
+    }
+    const c = createAudioController({ engine })
+    expect((await c.start({})).phase).toBe('failed')
+    expect(order).toEqual(['clear', 'start', 'clear'])
+  })
+
+  it('still starts sound when the delay part is missing', async () => {
+    const c = createAudioController({ engine: fakeEngine() })
+    expect(await c.start({})).toMatchObject({ phase: 'on' })
+  })
+
+  it('builds the report text and JSON from the summary, saved at the given time', () => {
+    const now = new Date('2026-11-27T13:50:00.000Z')
+    const c = createAudioController({ engine: { ...fakeEngine(), ...fakeLatency() } })
+    const report = c.latencyReport(now)
+    expect(report).toEqual({ ok: true, text: expect.any(String), json: expect.any(String) })
+    if (!report.ok) throw new Error('expected a report')
+    expect(report.text).toContain('About 4.2 ms from key to sound')
+    expect(JSON.parse(report.json)).toMatchObject({ savedAt: '2026-11-27T13:50:00.000Z', verdict: 'good' })
+  })
+
+  it('does not write a report when there is no delay part', () => {
+    const c = createAudioController({ engine: fakeEngine() })
+    expect(c.latencyReport(new Date())).toEqual({ ok: false, error: expect.any(String) })
   })
 })

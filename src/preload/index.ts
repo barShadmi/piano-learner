@@ -30,10 +30,19 @@ const midi = {
   }
 }
 
-// forcedTheme is added only when it is set, so a normal launch exposes just version, audio and midi.
+// The delay test asks for the numbers, forgets them, and saves or shows the report. It never plays or times sound.
+const latency = {
+  summary: () => ipcRenderer.invoke('latency:summary'),
+  clear: () => ipcRenderer.invoke('latency:clear'),
+  save: () => ipcRenderer.invoke('latency:save'),
+  showFile: () => ipcRenderer.invoke('latency:open-folder')
+}
+
+// forcedTheme is added only when it is set, so a normal launch exposes just version, audio, latency and midi.
 const api = {
   version: '0.0.1',
   audio,
+  latency,
   midi,
   ...(forcedTheme ? { forcedTheme } : {})
 }
