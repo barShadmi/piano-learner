@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createAudioController, type Engine, type MidiEngine } from './audioController'
-import type { MidiEvent, MidiStatus, StartResult } from '../shared/audio'
+import type { MidiEvent, MidiStatus, StartConfig, StartResult } from '../shared/audio'
+import type { SoundSettings } from '../shared/settings'
 import type { PianoEngine, LatencyEngine } from './audioController'
 import type { LatencySummary } from '../shared/latency'
 
@@ -492,5 +493,295 @@ describe('createAudioController delay test', () => {
   it('does not write a report when there is no delay part', () => {
     const c = createAudioController({ engine: fakeEngine() })
     expect(c.latencyReport(new Date())).toEqual({ ok: false, error: expect.any(String) })
+  })
+})
+
+const saved: SoundSettings = {
+  backend: 'wasapi-exclusive',
+  bufferFrames: 128,
+  volume: 0.8,
+  pianoSpeakers: false
+}
+
+// An engine that records each start call and each mixer call.
+function fakeMixEngine(over: Partial<Engine> = {}) {
+  const calls: Array<{ name: string; args?: unknown }> = []
+  const engine = {
+    calls,
+    starts: [] as Array<StartConfig | undefined>,
+    volumes: [] as number[],
+    speakerOff: [] as boolean[],
+    ...fakeEngine({
+      start: async (config?: StartConfig) => {
+        engine.starts.push(config)
+        calls.push({ name: 'start', args: config })
+        return goodResult
+      },
+      ...over
+    }),
+    setVolume(volume: number) {
+      engine.volumes.push(volume)
+      calls.push({ name: 'setVolume', args: volume })
+    },
+    setLocalControlOff(off: boolean) {
+      engine.speakerOff.push(off)
+      calls.push({ name: 'setLocalControlOff', args: off })
+    }
+  }
+  return engine
+}
+
+describe('createAudioController settings', () => {
+  it('starts sound with the chosen output, mode and buffer the first time', async () => {
+    const engine = fakeMixEngine({ listOutputs: async () => [output('Headphones')] })
+    const c = createAudioController({ engine })
+    const state = await c.applySettings({ ...saved, deviceId: 'Headphones', bufferFrames: 256 })
+    expect(state.phase).toBe('on')
+    expect(engine.starts).toEqual([{ deviceId: 'Headphones', backend: 'wasapi-exclusive', bufferFrames: 256 }])
+  })
+
+  it('does not restart when only the volume or the piano speakers change', async () => {
+    const engine = fakeMixEngine()
+    const c = createAudioController({ engine })
+    await c.applySettings(saved)
+    await c.applySettings({ ...saved, volume: 0.3, pianoSpeakers: true })
+    expect(engine.starts.length).toBe(1)
+  })
+
+  it('restarts when the buffer size changes, with the new buffer', async () => {
+    const engine = fakeMixEngine()
+    const c = createAudioController({ engine })
+    await c.applySettings(saved)
+    await c.applySettings({ ...saved, bufferFrames: 512 })
+    expect(engine.starts.length).toBe(2)
+    expect(engine.starts[1]).toEqual({ backend: 'wasapi-exclusive', bufferFrames: 512 })
+  })
+
+  it('restarts when the output device changes', async () => {
+    const engine = fakeMixEngine({ listOutputs: async () => [output('A'), output('B')] })
+    const c = createAudioController({ engine })
+    await c.applySettings({ ...saved, deviceId: 'A' })
+    await c.applySettings({ ...saved, deviceId: 'B' })
+    expect(engine.starts.length).toBe(2)
+  })
+
+  it('restarts when the mode changes', async () => {
+    const engine = fakeMixEngine()
+    const c = createAudioController({ engine })
+    await c.applySettings(saved)
+    await c.applySettings({ ...saved, backend: 'wasapi-shared' })
+    expect(engine.starts.length).toBe(2)
+  })
+
+  it('clears the remembered delays before and after a restart from settings', async () => {
+    const order: string[] = []
+    const engine = {
+      ...fakeMixEngine(),
+      ...fakeLatency({
+        clearLatency() {
+          order.push('clear')
+        }
+      })
+    }
+    engine.start = async () => {
+      order.push('start')
+      return goodResult
+    }
+    const c = createAudioController({ engine })
+    await c.applySettings(saved)
+    expect(order).toEqual(['clear', 'start', 'clear'])
+  })
+
+  it('tries to start again when the last start failed, even with the same settings', async () => {
+    let attempt = 0
+    const engine = fakeMixEngine({
+      start: async () => {
+        attempt++
+        if (attempt === 1) throw new Error('Device busy.')
+        return goodResult
+      }
+    })
+    const c = createAudioController({ engine })
+    expect((await c.applySettings(saved)).phase).toBe('failed')
+    expect((await c.applySettings(saved)).phase).toBe('on')
+  })
+
+  it('a retry after a failure starts again with the saved buffer, even when the settings are the same', async () => {
+    let attempt = 0
+    const engine = fakeMixEngine({
+      start: async (config?: StartConfig) => {
+        engine.starts.push(config)
+        attempt++
+        if (attempt === 1) throw new Error('Device busy.')
+        return goodResult
+      }
+    })
+    const c = createAudioController({ engine })
+    expect((await c.applySettings({ ...saved, bufferFrames: 256 })).phase).toBe('failed')
+    expect((await c.retry({ ...saved, bufferFrames: 256 })).phase).toBe('on')
+    expect(engine.starts.map((config) => config?.bufferFrames)).toEqual([256, 256])
+  })
+
+  it('a retry starts sound again even when it is already on a fallback mode', async () => {
+    const engine = fakeMixEngine({
+      start: async (config?: StartConfig) => {
+        engine.starts.push(config)
+        return { ...goodResult, backend: 'wasapi-shared', fallbackReason: 'Exclusive mode is busy.' }
+      }
+    })
+    const c = createAudioController({ engine })
+    await c.applySettings(saved)
+    await c.retry(saved)
+    expect(engine.starts.length).toBe(2)
+    expect(engine.starts[1]?.backend).toBe('wasapi-exclusive')
+  })
+
+  it('applies the volume once sound is on', async () => {
+    const engine = fakeMixEngine()
+    const c = createAudioController({ engine })
+    await c.applySettings({ ...saved, volume: 0.35 })
+    expect(engine.volumes).toEqual([0.35])
+  })
+
+  it('turns the piano speakers on by switching Local Control off, and back again', async () => {
+    const engine = fakeMixEngine()
+    const c = createAudioController({ engine })
+    await c.applySettings({ ...saved, pianoSpeakers: true })
+    expect(engine.speakerOff).toEqual([false])
+    await c.applySettings({ ...saved, pianoSpeakers: false })
+    expect(engine.speakerOff).toEqual([false, true])
+  })
+
+  it('applies the volume and speakers at once, with no restart, through the setters', () => {
+    const engine = fakeMixEngine()
+    const c = createAudioController({ engine })
+    c.setVolume(0.6)
+    c.setPianoSpeakers(true)
+    expect(engine.volumes).toEqual([0.6])
+    expect(engine.speakerOff).toEqual([false])
+    expect(engine.starts.length).toBe(0)
+  })
+
+  it('does nothing and does not throw when the engine has no mixer part', async () => {
+    const c = createAudioController({ engine: fakeEngine() })
+    expect(() => c.setVolume(0.5)).not.toThrow()
+    expect(() => c.setPianoSpeakers(true)).not.toThrow()
+    expect((await c.applySettings(saved)).phase).toBe('on')
+  })
+
+  it('turns an error from the mixer into a log line, not a throw', () => {
+    const engine = fakeMixEngine()
+    engine.setVolume = () => {
+      throw new Error('Broken.')
+    }
+    const c = createAudioController({ engine })
+    expect(() => c.setVolume(0.5)).not.toThrow()
+  })
+})
+
+function output(id: string) {
+  return { id, name: id, isDefault: false, backend: 'wasapi-exclusive' }
+}
+
+// Lets pending promise callbacks run.
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+describe('createAudioController settings that change while a start is opening', () => {
+  it('keeps the newest settings and restarts once more so the final sound matches them', async () => {
+    const starts: StartConfig[] = []
+    const releases: Array<(r: StartResult) => void> = []
+    const engine = fakeMixEngine({
+      start: (config?: StartConfig) => {
+        starts.push(config ?? {})
+        return new Promise<StartResult>((r) => releases.push(r))
+      }
+    })
+    const c = createAudioController({ engine })
+    const first = c.applySettings(saved)
+    await settle()
+    const second = c.applySettings({ ...saved, bufferFrames: 256, volume: 0.2 })
+    releases[0]({ ...goodResult, bufferFrames: 128 })
+    await settle()
+    expect(starts.length).toBe(2)
+    expect(starts[1]).toEqual({ backend: 'wasapi-exclusive', bufferFrames: 256 })
+    releases[1]({ ...goodResult, bufferFrames: 256 })
+    const [, final] = await Promise.all([first, second])
+    expect(final.phase).toBe('on')
+    expect(final.result?.bufferFrames).toBe(256)
+    expect(engine.volumes).toEqual([0.2])
+  })
+
+  it('a retry queued behind a running pass never replays old settings over a newer change', async () => {
+    const listReleases: Array<(o: ReturnType<typeof output>[]) => void> = []
+    const engine = fakeMixEngine({
+      listOutputs: () => new Promise((r) => listReleases.push(r))
+    })
+    const c = createAudioController({ engine })
+    const withDevice = { ...saved, deviceId: 'A' }
+    const first = c.applySettings(withDevice)
+    await settle()
+    const retried = c.retry(withDevice)
+    const newer = c.applySettings({ ...withDevice, bufferFrames: 256 })
+    for (let i = 0; i < 10; i++) {
+      while (listReleases.length) listReleases.shift()?.([output('A')])
+      await settle()
+    }
+    await Promise.all([first, retried, newer])
+    expect(engine.starts[engine.starts.length - 1]?.bufferFrames).toBe(256)
+  })
+
+  it('does not restart again when the newest settings match what is already running', async () => {
+    const starts: StartConfig[] = []
+    const releases: Array<(r: StartResult) => void> = []
+    const engine = fakeMixEngine({
+      start: (config?: StartConfig) => {
+        starts.push(config ?? {})
+        return new Promise<StartResult>((r) => releases.push(r))
+      }
+    })
+    const c = createAudioController({ engine })
+    const first = c.applySettings(saved)
+    await settle()
+    void c.applySettings({ ...saved, volume: 0.1 })
+    releases[0](goodResult)
+    await first
+    expect(starts.length).toBe(1)
+    expect(engine.volumes).toEqual([0.1])
+  })
+})
+
+describe('createAudioController saved output that is gone', () => {
+  it('starts on the default output and says so when the saved output is not listed', async () => {
+    const engine = fakeMixEngine({ listOutputs: async () => [output('Speakers')] })
+    const c = createAudioController({ engine })
+    const state = await c.applySettings({ ...saved, deviceId: 'Gone (USB)' })
+    expect(engine.starts).toEqual([{ backend: 'wasapi-exclusive', bufferFrames: 128 }])
+    expect(state.phase).toBe('on')
+    expect(state.settingsNote).toBe('Your saved sound output was not found, so the default output is used.')
+  })
+
+  it('starts on the saved output with no note when it is listed', async () => {
+    const engine = fakeMixEngine({ listOutputs: async () => [output('Gone (USB)')] })
+    const c = createAudioController({ engine })
+    const state = await c.applySettings({ ...saved, deviceId: 'Gone (USB)' })
+    expect(engine.starts).toEqual([{ deviceId: 'Gone (USB)', backend: 'wasapi-exclusive', bufferFrames: 128 }])
+    expect(state).not.toHaveProperty('settingsNote')
+  })
+
+  it('shows the note once: the next settings change without the missing output clears it', async () => {
+    let listed = [output('Speakers')]
+    const engine = fakeMixEngine({ listOutputs: async () => listed })
+    const c = createAudioController({ engine })
+    await c.applySettings({ ...saved, deviceId: 'Gone (USB)' })
+    listed = [output('Gone (USB)')]
+    const state = await c.applySettings({ ...saved, deviceId: 'Gone (USB)', volume: 0.5 })
+    expect(state).not.toHaveProperty('settingsNote')
+  })
+
+  it('starts with the saved output when the outputs cannot be listed', async () => {
+    const engine = fakeMixEngine({ listOutputs: async () => Promise.reject(new Error('Busy.')) })
+    const c = createAudioController({ engine })
+    await c.applySettings({ ...saved, deviceId: 'Gone (USB)' })
+    expect(engine.starts).toEqual([{ deviceId: 'Gone (USB)', backend: 'wasapi-exclusive', bufferFrames: 128 }])
   })
 })

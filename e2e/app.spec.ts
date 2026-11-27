@@ -4,9 +4,11 @@ import os from 'node:os'
 import path from 'node:path'
 
 // Each launch gets its own profile folder so parallel or repeated runs never share state.
-function launch(): ReturnType<typeof electron.launch> {
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-'))
+// A test that must keep state across two launches passes the same folder to both, and removes it itself.
+function launch(sharedUserData?: string): ReturnType<typeof electron.launch> {
+  const userData = sharedUserData ?? fs.mkdtempSync(path.join(os.tmpdir(), 'pl-'))
   const launched = electron.launch({ args: ['.', '--no-sandbox', `--user-data-dir=${userData}`] })
+  if (sharedUserData !== undefined) return launched
   // Remove the profile folder once the app has closed (or failed to start).
   const cleanup = (): void => fs.rmSync(userData, { recursive: true, force: true })
   void launched.then((app) => app.once('close', cleanup), cleanup)
@@ -68,7 +70,7 @@ test('the window is locked down: no Node, no new windows, only the safe bridge',
     expect(result.process).toBe('undefined')
     expect(result.opened).toBeNull()
     expect(result.midi).toBe('denied')
-    expect(result.bridge).toEqual(['audio', 'latency', 'midi', 'version'])
+    expect(result.bridge).toEqual(['audio', 'latency', 'midi', 'settings', 'version'])
 
     await page.evaluate(() => {
       location.href = 'https://example.com'
@@ -199,12 +201,16 @@ test('the sound questions are answered through the bridge and bad input is refus
       return {
         keys: Object.keys(audio).sort(),
         badStart: await audio.start({ bufferFrames: 1 }),
-        badTone: await audio.testTone({ frequencyHz: -5 })
+        badTone: await audio.testTone({ frequencyHz: -5 }),
+        goodVolume: await audio.setVolume(0.5),
+        badVolume: await audio.setVolume(2)
       }
     })
-    expect(result.keys).toEqual(['listOutputs', 'start', 'state', 'status', 'testTone'])
+    expect(result.keys).toEqual(['listOutputs', 'setVolume', 'start', 'state', 'status', 'testTone'])
     expect(result.badStart).toMatchObject({ phase: 'failed' })
     expect(result.badTone).toMatchObject({ ok: false })
+    expect(result.goodVolume).toEqual({ ok: true })
+    expect(result.badVolume).toMatchObject({ ok: false })
 
     const piano = await page.evaluate(async () => {
       const midi = (window as unknown as { pianoLearner: { midi: Record<string, unknown> } }).pianoLearner
@@ -215,5 +221,42 @@ test('the sound questions are answered through the bridge and bad input is refus
     expect(piano.status).toMatchObject({ ok: true, status: { connected: false } })
   } finally {
     await app.close()
+  }
+})
+
+test('the sound settings are labelled, save at once, and are kept after a restart', async () => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-settings-'))
+  try {
+    const first = await launch(userData)
+    try {
+      const window = await first.firstWindow()
+      await window.waitForLoadState('domcontentloaded')
+      await window.getByRole('link', { name: 'Sound' }).click()
+      await expect(window.getByRole('heading', { name: 'Sound', level: 1 })).toBeVisible()
+
+      for (const label of ['Output', 'Mode', 'Buffer', 'Volume']) {
+        await expect(window.getByLabel(label, { exact: true })).toBeVisible()
+      }
+      await expect(window.getByLabel("Let the piano's own speakers play too", { exact: true })).not.toBeChecked()
+
+      const buffer = window.getByLabel('Buffer', { exact: true })
+      await expect(buffer).toHaveValue('128')
+      await buffer.selectOption('256')
+      await expect(window.getByRole('status').filter({ hasText: 'Saved.' })).toBeVisible()
+    } finally {
+      await first.close()
+    }
+
+    const second = await launch(userData)
+    try {
+      const window = await second.firstWindow()
+      await window.waitForLoadState('domcontentloaded')
+      await window.getByRole('link', { name: 'Sound' }).click()
+      await expect(window.getByLabel('Buffer', { exact: true })).toHaveValue('256')
+    } finally {
+      await second.close()
+    }
+  } finally {
+    fs.rmSync(userData, { recursive: true, force: true })
   }
 })

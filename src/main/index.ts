@@ -4,7 +4,8 @@ import { pathToFileURL } from 'node:url'
 import { isAppUrl } from './appUrl'
 import { loadEngine, pianoFolder } from './audio'
 import { createAudioController } from './audioController'
-import { registerAudioIpc, sendMidiEvents } from './ipc'
+import { registerAudioIpc, registerSettingsIpc, sendMidiEvents } from './ipc'
+import { loadSettings } from './settingsStore'
 
 // These three are for development and the screenshot script only.
 // A packaged app ignores them, so nobody can steer an installed app with them.
@@ -141,11 +142,16 @@ if (!app.requestSingleInstanceLock()) {
       })
 
       if (app.isPackaged) Menu.setApplicationMenu(null)
-      registerAudioIpc(audio)
+      // The saved sound settings (defaults when there is no file). Read once here, in the main process.
+      const settingsFolder = app.getPath('userData')
+      const settings = loadSettings(settingsFolder)
+      const currentSettings = registerSettingsIpc(audio, settingsFolder, settings)
+      registerAudioIpc(audio, currentSettings)
       createWindow()
       // Open the sound output after the window exists, so it never delays the window.
-      // The result (or the reason it failed) is kept for the Sound screen.
-      void audio.start({})
+      // The result (or the reason it failed) is kept for the Sound screen. The saved volume
+      // and piano speaker choice are applied with it.
+      void audio.applySettings(settings)
       // Load the piano sound on a background thread. It does not wait for the output:
       // until it is ready (and if it fails) a simple tone plays, and the Sound screen says so.
       void audio.loadPiano(pianoFolder())

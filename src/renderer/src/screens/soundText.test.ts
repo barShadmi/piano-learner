@@ -1,17 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import {
   backendWords,
+  bufferLabel,
+  fallbackLine,
   lastKeyLine,
   latestKeyDown,
   LOCAL_CONTROL_TIP,
   localControlLine,
+  modeChoices,
+  modeLabel,
   noteName,
+  outputChoices,
+  outputLabel,
   pianoLine,
   pianoProblem,
   pianoSoundLine,
   PIANO_SOUND_CREDIT,
   statusLine
 } from './soundText'
+import type { OutputDevice } from '../../../shared/audio'
 
 describe('backendWords', () => {
   it('uses plain words for each way of playing', () => {
@@ -181,5 +188,98 @@ describe('localControlLine', () => {
     expect(LOCAL_CONTROL_TIP).toBe(
       'If you hear the sound twice, hold METRONOME and RHYTHM on the piano and press the C5 key.'
     )
+  })
+})
+
+describe('fallbackLine', () => {
+  it('says exclusive mode is busy and the app is on shared mode', () => {
+    expect(fallbackLine('wasapi-shared')).toBe(
+      'Exclusive mode is busy, so the app is using shared mode. Close other apps that use sound and press Try again.'
+    )
+  })
+
+  it('names the mode it fell back to when that is not shared mode', () => {
+    expect(fallbackLine('cpal')).toBe(
+      'Exclusive mode did not work, so the app is using standard mode. Close other apps that use sound and press Try again.'
+    )
+  })
+})
+
+describe('bufferLabel', () => {
+  it('gives the samples and the about-time at 48000 Hz', () => {
+    expect(bufferLabel(64)).toBe('64 samples, about 1.3 ms')
+    expect(bufferLabel(128)).toBe('128 samples, about 2.7 ms')
+    expect(bufferLabel(256)).toBe('256 samples, about 5.3 ms')
+    expect(bufferLabel(512)).toBe('512 samples, about 10.7 ms')
+  })
+})
+
+describe('outputLabel', () => {
+  it('marks a headphone device, whatever the case of the word', () => {
+    expect(outputLabel('Headphones (Realtek)')).toBe('Headphones (Realtek) (headphones)')
+    expect(outputLabel('USB HEADPHONE SET')).toBe('USB HEADPHONE SET (headphones)')
+  })
+
+  it('leaves other device names as they are', () => {
+    expect(outputLabel('Speakers (Realtek)')).toBe('Speakers (Realtek)')
+  })
+})
+
+describe('modeLabel', () => {
+  it('uses the plain words for each mode', () => {
+    expect(modeLabel('wasapi-exclusive')).toBe('Fastest (exclusive)')
+    expect(modeLabel('wasapi-shared')).toBe('Shared with other apps')
+    expect(modeLabel('asio')).toBe('ASIO driver')
+    expect(modeLabel('cpal')).toBe('Standard mode')
+  })
+})
+
+const windowsOutputs: OutputDevice[] = [
+  { id: 'spk', name: 'Speakers (Realtek)', isDefault: true, backend: 'wasapi-exclusive' },
+  { id: 'hp', name: 'Headphones (Realtek)', isDefault: false, backend: 'wasapi-exclusive' },
+  { id: 'spk', name: 'Speakers (Realtek)', isDefault: true, backend: 'wasapi-shared' },
+  { id: 'hp', name: 'Headphones (Realtek)', isDefault: false, backend: 'wasapi-shared' },
+  { id: 'asio1', name: 'Interface ASIO', isDefault: false, backend: 'asio' }
+]
+
+describe('outputChoices', () => {
+  it('starts with the Windows default output, then each device of this mode once', () => {
+    expect(outputChoices(windowsOutputs, 'wasapi-shared')).toEqual([
+      { value: '', label: 'Windows default output' },
+      { value: 'spk', label: 'Speakers (Realtek)' },
+      { value: 'hp', label: 'Headphones (Realtek) (headphones)' }
+    ])
+  })
+
+  it('lists only the ASIO drivers in ASIO mode', () => {
+    expect(outputChoices(windowsOutputs, 'asio')).toEqual([
+      { value: '', label: 'Windows default output' },
+      { value: 'asio1', label: 'Interface ASIO' }
+    ])
+  })
+
+  it('keeps a saved device that is not listed, so the choice still shows', () => {
+    expect(outputChoices(windowsOutputs, 'wasapi-exclusive', 'gone')).toContainEqual({
+      value: 'gone',
+      label: 'Saved output (not connected)'
+    })
+  })
+})
+
+describe('modeChoices', () => {
+  it('offers the modes that the outputs list, in a fixed order', () => {
+    expect(modeChoices(windowsOutputs, 'wasapi-exclusive')).toEqual(['wasapi-exclusive', 'wasapi-shared', 'asio'])
+  })
+
+  it('leaves out ASIO when no ASIO driver is listed', () => {
+    expect(modeChoices(windowsOutputs.slice(0, 4), 'wasapi-exclusive')).toEqual([
+      'wasapi-exclusive',
+      'wasapi-shared'
+    ])
+  })
+
+  it('offers the standard mode alone on a system without Windows audio, and keeps the saved mode', () => {
+    expect(modeChoices([{ id: 'x', name: 'Speakers', isDefault: true, backend: 'cpal' }], 'cpal')).toEqual(['cpal'])
+    expect(modeChoices([], 'cpal')).toEqual(['cpal'])
   })
 })

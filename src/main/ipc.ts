@@ -3,18 +3,30 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { MidiEvent } from '../shared/audio'
 import type { LatencySaveReply } from '../shared/latency'
+import type { VolumeReply } from '../shared/audio'
+import { checkSettings, type SettingsSetReply, type SoundSettings } from '../shared/settings'
 import type { AudioController } from './audioController'
-import { parseStartConfig, parseToneArgs } from './audioValidate'
+import { parseStartConfig, parseToneArgs, parseVolume } from './audioValidate'
+import { saveSettings } from './settingsStore'
 
-// Only the five sound questions the Sound screen may ask. Each one checks its input,
+// Only the sound questions the Sound screen may ask. Each one checks its input,
 // and none of them rejects: a bad request comes back as a plain reply.
-export function registerAudioIpc(audio: AudioController): void {
+// `currentSettings` is the saved settings. A start with no input (Start sound, Try again) uses them.
+export function registerAudioIpc(audio: AudioController, currentSettings: () => SoundSettings): void {
   ipcMain.handle('audio:state', () => audio.state())
   ipcMain.handle('audio:list-outputs', () => audio.listOutputs())
   ipcMain.handle('audio:start', (_event, input: unknown) => {
+    if (input === undefined || input === null) return audio.retry(currentSettings())
     const parsed = parseStartConfig(input)
     if (!parsed.ok) return { phase: 'failed', error: parsed.error }
     return audio.start(parsed.value)
+  })
+  // The volume while Bar drags the slider. It only changes the level; the saved setting is written by settings:set.
+  ipcMain.handle('audio:set-volume', (_event, input: unknown): VolumeReply => {
+    const parsed = parseVolume(input)
+    if (!parsed.ok) return parsed
+    audio.setVolume(parsed.value)
+    return { ok: true }
   })
   ipcMain.handle('audio:test-tone', (_event, input: unknown) => {
     const parsed = parseToneArgs(input)
@@ -26,6 +38,30 @@ export function registerAudioIpc(audio: AudioController): void {
   ipcMain.handle('midi:status', () => audio.midiStatus())
   ipcMain.handle('midi:reconnect', () => audio.reconnectMidi())
   registerLatencyIpc(audio)
+}
+
+// The sound settings. The renderer only sends the whole set; it is checked with checkSettings and
+// saved to the fixed settings file in `folder` (the user data folder). Then the sound is applied.
+// `initial` is what was loaded at start, so settings:get answers without reading the disk.
+// Returns a function that gives the settings saved now (used by the sound start).
+export function registerSettingsIpc(audio: AudioController, folder: string, initial: SoundSettings): () => SoundSettings {
+  let current = initial
+  ipcMain.handle('settings:get', (): SoundSettings => current)
+  ipcMain.handle('settings:set', async (_event, input: unknown): Promise<SettingsSetReply> => {
+    const checked = checkSettings(input, process.platform)
+    if (!checked.ok) return checked
+    const next = checked.value
+    try {
+      saveSettings(folder, next)
+    } catch (error) {
+      console.error('The sound settings could not be saved:', error)
+      return { ok: false, error: 'The settings could not be saved.' }
+    }
+    current = next
+    const state = await audio.applySettings(next)
+    return { ok: true, settings: next, state }
+  })
+  return () => current
 }
 
 // The delay test. The renderer only asks; no input from it is used. The report files always

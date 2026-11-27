@@ -7,9 +7,11 @@ import type {
   StartConfig,
   StatusReply,
   TestToneReply,
-  ToneArgs
+  ToneArgs,
+  VolumeReply
 } from '../shared/audio'
 import type { LatencyClearReply, LatencyOpenReply, LatencyReply, LatencySaveReply } from '../shared/latency'
+import type { SettingsSetReply, SoundSettings } from '../shared/settings'
 
 export {}
 
@@ -24,12 +26,17 @@ declare global {
         start(config?: StartConfig): Promise<AudioState>
         testTone(args?: ToneArgs): Promise<TestToneReply>
         status(): Promise<StatusReply>
+        setVolume(volume: number): Promise<VolumeReply>
       }
       latency: {
         summary(): Promise<LatencyReply>
         clear(): Promise<LatencyClearReply>
         save(): Promise<LatencySaveReply>
         showFile(): Promise<LatencyOpenReply>
+      }
+      settings: {
+        get(): Promise<SoundSettings>
+        set(next: SoundSettings): Promise<SettingsSetReply>
       }
       midi: {
         status(): Promise<MidiStatusReply>

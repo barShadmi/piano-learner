@@ -6,6 +6,8 @@ import {
   type LatencyReportReply,
   type LatencySummary
 } from '../shared/latency'
+import type { SoundSettings } from '../shared/settings'
+import { startConfigFor } from '../shared/settings'
 import type {
   AudioState,
   EngineStatus,
@@ -54,8 +56,15 @@ export type LatencyEngine = {
   clearLatency(): void
 }
 
-export type FullEngine = Engine & Partial<MidiEngine> & Partial<PianoEngine> & Partial<LatencyEngine>
+// The volume and piano speaker part of the native addon. Also optional: an older addon has none.
+export type MixEngine = {
+  setVolume(volume: number): void
+  setLocalControlOff(off: boolean): void
+}
 
+export type FullEngine = Engine & Partial<MidiEngine> & Partial<PianoEngine> & Partial<LatencyEngine> & Partial<MixEngine>
+
+const missingOutputNote = 'Your saved sound output was not found, so the default output is used.'
 const delayMissing = 'The delay part of the sound engine is not available.'
 const delayUnreadable = 'The delay numbers could not be read.'
 
@@ -83,8 +92,22 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
   let piano: PianoSound = engine ? 'loading' : 'failed'
   let pianoError: string | undefined = engine ? undefined : missing
   let pianoLoading: Promise<void> | undefined
+  // The start settings of the sound that is running now (set only when a start worked).
+  let runningConfig: StartConfig | undefined
+  // The start that is opening now, if any. Settings wait for it to settle.
+  let pendingStart: Promise<AudioState> | undefined
+  // The newest settings Bar wants, and the pass that is working towards them (if any).
+  let wanted: SoundSettings | undefined
+  let applying: Promise<AudioState> | undefined
+  // Set by retry: the next settle step starts sound even when the running sound matches. Read once, then cleared.
+  let forceRestart = false
+  // Set when the saved output was not found and the default output is used. Cleared by the next settings change.
+  let settingsNote: string | undefined
 
-  const view = (): AudioState => (pianoError ? { ...current, piano, pianoError } : { ...current, piano })
+  const view = (): AudioState => {
+    const base = settingsNote ? { ...current, settingsNote } : current
+    return pianoError ? { ...base, piano, pianoError } : { ...base, piano }
+  }
 
   // Forgets the remembered key timings. Never throws.
   const forgetDelays = (): void => {
@@ -104,6 +127,108 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     } catch (error) {
       return { ok: false, error: reason(error, delayUnreadable) }
     }
+  }
+
+  // Opens the sound output through the one start path. Clears the delays before and after.
+  // A call while a start is opening returns that start's answer; the settings pass runs again after it.
+  const start = (config: StartConfig): Promise<AudioState> => {
+    if (current.phase === 'starting') return Promise.resolve(view())
+    if (!engine) {
+      current = { phase: 'failed', error: missing }
+      return Promise.resolve(view())
+    }
+    current = { phase: 'starting' }
+    runningConfig = undefined
+    // A new start means new settings, so the old key timings must not mix in. The engine can
+    // keep unread timings from the old session, so forget again once the start has settled.
+    forgetDelays()
+    const run = openSound(config)
+    pendingStart = run
+    void run.then(() => {
+      if (pendingStart === run) pendingStart = undefined
+    })
+    return run
+  }
+
+  const openSound = async (config: StartConfig): Promise<AudioState> => {
+    try {
+      current = { phase: 'on', result: await engine!.start(config) }
+      runningConfig = config
+    } catch (error) {
+      current = { phase: 'failed', error: reason(error, 'Sound could not start.') }
+    }
+    forgetDelays()
+    return view()
+  }
+
+  // The output the saved settings name, or the default when that output is not listed.
+  // Returns the note to show when it falls back. If the outputs cannot be listed, the saved one is tried.
+  const configFor = async (settings: SoundSettings): Promise<{ config: StartConfig; note?: string }> => {
+    const config = startConfigFor(settings)
+    if (config.deviceId === undefined || !engine || typeof engine.listOutputs !== 'function') return { config }
+    let outputs: OutputDevice[]
+    try {
+      outputs = await engine.listOutputs()
+    } catch {
+      return { config }
+    }
+    if (outputs.some((output) => output.id === config.deviceId)) return { config }
+    const fallback: StartConfig = { backend: config.backend, bufferFrames: config.bufferFrames }
+    return { config: fallback, note: missingOutputNote }
+  }
+
+  // Works towards the newest wanted settings until a finished start matches them. Only the
+  // latest settings count: a change during a start means one more start, not a queue.
+  const settlePass = async (): Promise<AudioState> => {
+    let target: SoundSettings
+    for (;;) {
+      target = wanted as SoundSettings
+      const { config, note } = await configFor(target)
+      if (pendingStart) await pendingStart
+      if (target !== wanted) continue
+      settingsNote = note
+      const force = forceRestart
+      forceRestart = false
+      if (force || current.phase !== 'on' || !sameStart(runningConfig, config)) {
+        await start(config)
+      }
+      if (target === wanted && !forceRestart) break
+    }
+    setVolume(target.volume)
+    setPianoSpeakers(target.pianoSpeakers)
+    return view()
+  }
+
+  // Sets the volume on the engine. Never throws; it does not restart anything.
+  const setVolume = (volume: number): void => {
+    if (!engine || typeof engine.setVolume !== 'function') return
+    try {
+      engine.setVolume(volume)
+    } catch (error) {
+      console.error('The volume could not be set:', error)
+    }
+  }
+
+  // Piano speakers on means Local Control off is false. Never throws.
+  const setPianoSpeakers = (on: boolean): void => {
+    if (!engine || typeof engine.setLocalControlOff !== 'function') return
+    try {
+      engine.setLocalControlOff(!on)
+    } catch (error) {
+      console.error('The piano speakers could not be set:', error)
+    }
+  }
+
+  // Applies the saved settings. Sound restarts only when the output, mode or buffer differ from
+  // the running sound (or no sound is on). Volume and the piano speakers apply once it settles.
+  // Settings sent while a start is opening are not lost: the newest ones are applied after it.
+  const applySettings = (next: SoundSettings): Promise<AudioState> => {
+    wanted = next
+    if (applying) return applying
+    applying = settlePass().finally(() => {
+      applying = undefined
+    })
+    return applying
   }
 
   return {
@@ -137,24 +262,21 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
       return pianoLoading
     },
 
-    async start(config: StartConfig): Promise<AudioState> {
-      if (current.phase === 'starting') return view()
-      if (!engine) {
-        current = { phase: 'failed', error: missing }
-        return view()
-      }
-      current = { phase: 'starting' }
-      // A new start means new settings, so the old key timings must not mix in. The engine can
-      // keep unread timings from the old session, so forget again once the start has settled.
-      forgetDelays()
-      try {
-        current = { phase: 'on', result: await engine.start(config) }
-      } catch (error) {
-        current = { phase: 'failed', error: reason(error, 'Sound could not start.') }
-      }
-      forgetDelays()
-      return view()
+    start,
+
+    applySettings,
+
+    // Try again: starts sound with these settings even when they match the running sound
+    // (a failed start, or a fallback mode). While a pass is running it only asks that pass for a
+    // start: the pass already works towards the newest settings, which must not be replaced by older ones.
+    retry(next: SoundSettings): Promise<AudioState> {
+      forceRestart = true
+      if (applying) return applying
+      return applySettings(next)
     },
+
+    setVolume,
+    setPianoSpeakers,
 
     stop(): void {
       if (!engine) return
@@ -164,6 +286,7 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
         console.error('Sound did not stop cleanly:', error)
       }
       current = { phase: 'off' }
+      runningConfig = undefined
     },
 
     testTone(args: ToneArgs): TestToneReply {
@@ -261,6 +384,11 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
       return { ok: true, text: reportText(result.summary, now), json: reportJson(result.summary, now) }
     }
   }
+}
+
+// Two start configs are the same sound when output, mode and buffer match.
+function sameStart(a: StartConfig | undefined, b: StartConfig): boolean {
+  return a !== undefined && a.deviceId === b.deviceId && a.backend === b.backend && a.bufferFrames === b.bufferFrames
 }
 
 export type AudioController = ReturnType<typeof createAudioController>
