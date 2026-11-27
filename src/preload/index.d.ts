@@ -4,6 +4,9 @@ import type {
   MidiEvent,
   MidiReconnectReply,
   MidiStatusReply,
+  SongEvent,
+  SongPositionReply,
+  SongReply,
   StartConfig,
   StatusReply,
   TestToneReply,
@@ -38,6 +41,13 @@ declare global {
       settings: {
         get(): Promise<SoundSettings>
         set(next: SoundSettings): Promise<SettingsSetReply>
+      }
+      song: {
+        /** The engine plays the song (replacing one that is playing), starting `fromMs` into it. */
+        play(events: SongEvent[], fromMs: number): Promise<SongReply>
+        stop(): Promise<SongReply>
+        /** Where the song is in ms, or null when none plays. */
+        position(): Promise<SongPositionReply>
       }
       songs: {
         list(): Promise<SongSummary[]>

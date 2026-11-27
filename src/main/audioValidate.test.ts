@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseStartConfig, parseToneArgs, parseVolume } from './audioValidate'
+import { parseSongPlay, parseStartConfig, parseToneArgs, parseVolume } from './audioValidate'
 
 describe('parseVolume', () => {
   it('accepts a number from 0 to 1', () => {
@@ -97,5 +97,76 @@ describe('parseToneArgs', () => {
     expect(parseToneArgs('loud').ok).toBe(false)
     expect(parseToneArgs([]).ok).toBe(false)
     expect(parseToneArgs({ gain: 1 }).ok).toBe(false)
+  })
+})
+
+describe('parseSongPlay', () => {
+  const ok = { timeMs: 0, note: 60, velocity: 80, on: true }
+
+  it('accepts events and a start point', () => {
+    const input = { events: [ok, { timeMs: 10.5, note: 108, velocity: 0, on: false }], fromMs: 5 }
+    expect(parseSongPlay(input)).toEqual({ ok: true, value: input })
+  })
+
+  it('starts at 0 when no start point is given, and allows an empty song', () => {
+    expect(parseSongPlay({ events: [] })).toEqual({ ok: true, value: { events: [], fromMs: 0 } })
+  })
+
+  it('accepts exactly 200000 events and refuses one more', () => {
+    expect(parseSongPlay({ events: new Array(200_000).fill(ok), fromMs: 0 }).ok).toBe(true)
+    const parsed = parseSongPlay({ events: new Array(200_001).fill(ok), fromMs: 0 })
+    expect(parsed).toEqual({ ok: false, error: 'A song can have at most 200000 events.' })
+  })
+
+  it('refuses anything that is not an object with a list of events', () => {
+    for (const bad of [undefined, null, 5, 'x', [], { fromMs: 0 }, { events: 'no' }, { events: {} }]) {
+      expect(parseSongPlay(bad).ok, String(JSON.stringify(bad))).toBe(false)
+    }
+  })
+
+  it('refuses unexpected fields at either level', () => {
+    expect(parseSongPlay({ events: [], fromMs: 0, extra: 1 }).ok).toBe(false)
+    expect(parseSongPlay({ events: [{ ...ok, extra: 1 }] }).ok).toBe(false)
+    expect(parseSongPlay({ events: [{ timeMs: 0, note: 60, velocity: 80 }] }).ok).toBe(false)
+  })
+
+  it('refuses a note outside 21 to 108 or not a whole number', () => {
+    for (const note of [20, 109, 60.5, NaN, '60', undefined]) {
+      expect(parseSongPlay({ events: [{ ...ok, note }] }).ok, String(note)).toBe(false)
+    }
+  })
+
+  it('refuses a velocity outside 1 to 127 for a note on, but lets a note off use 0', () => {
+    for (const velocity of [0, 128, 1.5, -1, NaN]) {
+      expect(parseSongPlay({ events: [{ ...ok, velocity }] }).ok, String(velocity)).toBe(false)
+    }
+    expect(parseSongPlay({ events: [{ ...ok, on: false, velocity: 0 }] }).ok).toBe(true)
+    expect(parseSongPlay({ events: [{ ...ok, on: false, velocity: 128 }] }).ok).toBe(false)
+  })
+
+  it('refuses times that are negative, infinite or not numbers', () => {
+    for (const timeMs of [-1, NaN, Infinity, '0', null]) {
+      expect(parseSongPlay({ events: [{ ...ok, timeMs }] }).ok, String(timeMs)).toBe(false)
+    }
+    for (const fromMs of [-1, NaN, Infinity, '0', null]) {
+      expect(parseSongPlay({ events: [], fromMs }).ok, String(fromMs)).toBe(false)
+    }
+  })
+
+  it('allows a time of one day and refuses more', () => {
+    const day = 86_400_000
+    expect(parseSongPlay({ events: [{ ...ok, timeMs: day }], fromMs: day }).ok).toBe(true)
+    expect(parseSongPlay({ events: [{ ...ok, timeMs: day + 1 }] }).ok).toBe(false)
+    expect(parseSongPlay({ events: [], fromMs: day + 1 }).ok).toBe(false)
+    expect(parseSongPlay({ events: [{ ...ok, timeMs: Number.MAX_VALUE }] }).ok).toBe(false)
+  })
+
+  it('refuses on that is not a true or false', () => {
+    expect(parseSongPlay({ events: [{ ...ok, on: 1 }] }).ok).toBe(false)
+  })
+
+  it('gives plain English reasons', () => {
+    const parsed = parseSongPlay({ events: [{ ...ok, note: 5 }] })
+    expect(parsed).toEqual({ ok: false, error: expect.stringMatching(/note/i) })
   })
 })

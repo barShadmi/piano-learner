@@ -75,7 +75,7 @@ test('the window is locked down: no Node, no new windows, only the safe bridge',
     expect(result.process).toBe('undefined')
     expect(result.opened).toBeNull()
     expect(result.midi).toBe('denied')
-    expect(result.bridge).toEqual(['audio', 'latency', 'midi', 'settings', 'songs', 'version'])
+    expect(result.bridge).toEqual(['audio', 'latency', 'midi', 'settings', 'song', 'songs', 'version'])
 
     await page.evaluate(() => {
       location.href = 'https://example.com'

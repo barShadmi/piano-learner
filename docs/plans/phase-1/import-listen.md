@@ -34,3 +34,4 @@ Acceptance: npm test, lint, typecheck, build, e2e pass.
 | --- | --- | --- | --- |
 | 1 | builder-plus (Sonnet) | 2 | FAIL (a pickup bar left a silent gap), then PASS. Later: use implicit="yes" before the length check for pickups; tempos inside a pickup bar are not shifted. |
 | 2 | builder (Haiku) | 2 | FAIL (identical "Play" link names; a notation program named in a test comment), then PASS. Imports run in a worker thread; Bar should try one import in the Windows installer. |
+| 3 | builder-plus (Sonnet) | 3 | FAIL (Windows timer granularity, time overflow, unbounded song ring per callback), FAIL (stop event made release retries instant), then PASS. Real song timing on Windows is checked at Bar's gate. Later: song and Bar share one mixer by pitch. |

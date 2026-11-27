@@ -18,6 +18,9 @@ import type {
   MidiStatusReply,
   OutputDevice,
   PianoSound,
+  SongEvent,
+  SongPositionReply,
+  SongReply,
   StartConfig,
   StartResult,
   StatusReply,
@@ -62,7 +65,19 @@ export type MixEngine = {
   setLocalControlOff(off: boolean): void
 }
 
-export type FullEngine = Engine & Partial<MidiEngine> & Partial<PianoEngine> & Partial<LatencyEngine> & Partial<MixEngine>
+// The song player part of the native addon. Also optional. The sound of a song is made by the engine.
+export type SongEngine = {
+  playSong(events: SongEvent[], fromMs: number): void
+  stopSong(): void
+  songPosition(): number | null
+}
+
+export type FullEngine = Engine &
+  Partial<MidiEngine> &
+  Partial<PianoEngine> &
+  Partial<LatencyEngine> &
+  Partial<MixEngine> &
+  Partial<SongEngine>
 
 const missingOutputNote = 'Your saved sound output was not found, so the default output is used.'
 const delayMissing = 'The delay part of the sound engine is not available.'
@@ -231,6 +246,19 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     return applying
   }
 
+  const songMissing = 'The song player of the sound engine is not available.'
+
+  // Stops the song and releases its notes. Never throws; nothing playing is not an error.
+  const stopSong = (): SongReply => {
+    if (!engine || typeof engine.stopSong !== 'function') return { ok: true }
+    try {
+      engine.stopSong()
+    } catch (error) {
+      console.error('The song did not stop cleanly:', error)
+    }
+    return { ok: true }
+  }
+
   return {
     state(): AudioState {
       return view()
@@ -280,6 +308,7 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
 
     stop(): void {
       if (!engine) return
+      stopSong()
       try {
         engine.stop()
       } catch (error) {
@@ -361,6 +390,36 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
         return { ok: true }
       } catch (error) {
         return { ok: false, error: reason(error, 'The piano could not be reconnected.') }
+      }
+    },
+
+    // Listen mode. The engine plays the song; these only start it, stop it and read where it is.
+    // The events were checked in the main process before they got here.
+    playSong(events: SongEvent[], fromMs: number): SongReply {
+      if (!engine || current.phase !== 'on') return { ok: false, error: 'Sound is not on yet.' }
+      if (typeof engine.playSong !== 'function') return { ok: false, error: songMissing }
+      try {
+        engine.playSong(events, fromMs)
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: reason(error, 'The song could not start.') }
+      }
+    },
+
+    stopSong,
+
+    // Where the song is, in ms, or null when none plays.
+    songPosition(): SongPositionReply {
+      if (!engine) return { ok: false, error: missing }
+      if (typeof engine.songPosition !== 'function') return { ok: false, error: songMissing }
+      try {
+        const positionMs = engine.songPosition()
+        if (positionMs === null || (typeof positionMs === 'number' && Number.isFinite(positionMs))) {
+          return { ok: true, positionMs }
+        }
+        return { ok: false, error: 'The song position could not be read.' }
+      } catch (error) {
+        return { ok: false, error: reason(error, 'The song position could not be read.') }
       }
     },
 

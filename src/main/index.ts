@@ -74,6 +74,7 @@ function createWindow(): void {
   })
   // Windows shutdown or log off skips before-quit, so give the piano its speakers back here too.
   win.on('session-end', () => {
+    audio.stopSong()
     audio.stopMidi()
     audio.stop()
   })
@@ -194,6 +195,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('before-quit', () => {
+  audio.stopSong()
   audio.stopMidi()
   audio.stop()
 })
