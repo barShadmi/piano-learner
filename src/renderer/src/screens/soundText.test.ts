@@ -6,6 +6,8 @@ import {
   noteName,
   pianoLine,
   pianoProblem,
+  pianoSoundLine,
+  PIANO_SOUND_CREDIT,
   statusLine
 } from './soundText'
 
@@ -21,15 +23,16 @@ describe('backendWords', () => {
 
 describe('statusLine', () => {
   it('says what is happening for each phase', () => {
-    expect(statusLine({ phase: 'starting' })).toBe('Starting sound…')
-    expect(statusLine({ phase: 'off' })).toBe('Sound is off.')
-    expect(statusLine({ phase: 'failed', error: 'No sound card.' })).toBe('Sound could not start.')
+    expect(statusLine({ phase: 'starting', piano: 'loading' })).toBe('Starting sound…')
+    expect(statusLine({ phase: 'off', piano: 'loading' })).toBe('Sound is off.')
+    expect(statusLine({ phase: 'failed', error: 'No sound card.', piano: 'loading' })).toBe('Sound could not start.')
   })
 
   it('describes the device, mode, buffer and delay when on', () => {
     expect(
       statusLine({
         phase: 'on',
+        piano: 'ready',
         result: {
           backend: 'wasapi-exclusive',
           deviceName: 'Headphones (Realtek)',
@@ -45,6 +48,7 @@ describe('statusLine', () => {
     expect(
       statusLine({
         phase: 'on',
+        piano: 'ready',
         result: {
           backend: 'cpal',
           deviceName: 'Speakers',
@@ -124,5 +128,21 @@ describe('lastKeyLine', () => {
 
   it('is empty before any key is played', () => {
     expect(lastKeyLine(undefined)).toBe('')
+  })
+})
+
+describe('pianoSoundLine', () => {
+  it('says the piano sound is loading, ready, or could not load', () => {
+    expect(pianoSoundLine('loading')).toBe('Piano sound is loading…')
+    expect(pianoSoundLine('ready')).toBe('Piano sound is ready.')
+    expect(pianoSoundLine('failed')).toBe(
+      'Piano sound could not load. You hear a simple tone instead.'
+    )
+  })
+
+  it('has the credit line for the sampled piano', () => {
+    expect(PIANO_SOUND_CREDIT).toBe(
+      'Piano sound: Salamander Grand Piano by Alexander Holm (CC BY 3.0).'
+    )
   })
 })

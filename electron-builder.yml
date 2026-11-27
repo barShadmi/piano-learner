@@ -11,6 +11,11 @@ extraResources:
     to: native
     filter:
       - '*.node'
+  - from: assets/piano
+    to: piano
+    filter:
+      - '*.ogg'
+      - CREDITS.md
 win:
   target:
     - target: nsis

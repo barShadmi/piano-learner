@@ -282,7 +282,8 @@ fn run_with_com(
         return;
     }
     let backend = if exclusive { "wasapi-exclusive" } else { "wasapi-shared" };
-    let core = EngineCore::with_midi(inbox.commands, inbox.midi, Mixer::new(stream.sample_rate, stream.channels));
+    let core = EngineCore::with_midi(inbox.commands, inbox.midi, Mixer::new(stream.sample_rate, stream.channels))
+        .with_bank_link(inbox.banks);
     let info = StartInfo {
         backend: backend.to_string(),
         device_name: stream.device_name.clone(),

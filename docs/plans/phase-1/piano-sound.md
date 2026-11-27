@@ -24,3 +24,4 @@ Acceptance: npm test, lint, build, e2e pass; screenshots light and dark; CI gree
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
 | 1 | builder-plus (Sonnet) | 2 | PASS, then a per-sample loudness fix after the verifier measured jumps of up to 5 dB at layer boundaries; re-verified on rendered output (0 of 264 pairs over 1 dB). |
+| 2 | builder-plus (Sonnet) | 1 | PASS. Each output session has its own bank link and the bank is always sent through it; the engine keeps an Arc so the audio thread never frees it. Lead: dropped a display-only `ls | head` from CI. |

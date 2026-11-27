@@ -115,6 +115,12 @@ test('the Sound screen opens from the library, says sound state, and goes back',
       timeout: 20_000
     })
 
+    // The piano sound loads on its own, even with no sound card to play it on.
+    await expect(window.getByText('Piano sound is ready.')).toBeVisible({ timeout: 30_000 })
+    await expect(
+      window.getByText('Piano sound: Salamander Grand Piano by Alexander Holm (CC BY 3.0).')
+    ).toBeVisible()
+
     // This container has no MIDI ports, so the piano shows as not found.
     await expect(
       window.getByText('No piano found. Check that the piano is on and the USB cable is plugged in.')

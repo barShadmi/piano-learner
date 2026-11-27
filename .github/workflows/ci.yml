@@ -37,6 +37,9 @@ jobs:
       # Never --all-features: the test-only `noop` feature switches the real addon code off.
       - run: cargo test
         working-directory: native/audio-engine
+      # The release run too, so the check that the real piano loads fast enough runs.
+      - run: cargo test --release
+        working-directory: native/audio-engine
       - run: cargo clippy -- -D warnings
         working-directory: native/audio-engine
       - run: cargo clippy --all-targets -- -D warnings
@@ -81,6 +84,12 @@ jobs:
         run: |
           ls -l release/win-unpacked/resources/native/
           test -f release/win-unpacked/resources/native/audio-engine.win32-x64-msvc.node
+      - name: Check the installer holds the piano sounds
+        shell: bash
+        run: |
+          count=$(ls release/win-unpacked/resources/piano/*.ogg | wc -l)
+          echo "piano sounds: $count"
+          test "$count" -eq 120
       - uses: actions/upload-artifact@v4
         with:
           name: PianoLearner-Setup

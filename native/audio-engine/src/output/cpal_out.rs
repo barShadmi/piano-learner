@@ -233,7 +233,8 @@ fn open_stream(
     config.buffer_size = wanted;
     let channels = config.channels;
 
-    let core = EngineCore::with_midi(inbox.commands, inbox.midi, Mixer::new(sample_rate, channels));
+    let core = EngineCore::with_midi(inbox.commands, inbox.midi, Mixer::new(sample_rate, channels))
+        .with_bank_link(inbox.banks);
     let stream = build_for_format(&device, config, format, core, stats).map_err(|e| {
         if e.kind() == ErrorKind::UnsupportedConfig && matches!(config.buffer_size, BufferSize::Fixed(_)) {
             BUFFER_REFUSED.to_string()
