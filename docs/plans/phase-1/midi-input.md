@@ -32,6 +32,7 @@ Tests first: `pick_port` table (["Microsoft GS Wavetable", "Digital Piano"] → 
 Acceptance: as step 1, plus `npm run build` in the crate and a node check: `startMidi()`, `listMidiInputs()` returns an array (may be empty here), `midiStatus()` says not connected, `stopMidi()` returns.
 
 ## Step 3 · Piano status in the app (builder)
+Real API from step 2: `startMidi()`, `stopMidi()`, `reconnectMidi()`, `listMidiInputs(): string[]`, `midiStatus(): { connected, portName?, error?, events, droppedSound, droppedScreen }`, `onMidiEvent(cb)` where cb gets an array of `{ kind: 'on'|'off'|'sustain'|'allOff', note, velocity, down?, timeUs }`. `stopMidi` releases the callback, so call `onMidiEvent` again after every `startMidi`. The callback runs in the main process and must never throw (wrap the body in try/catch): a throw there crashes the app. Add a "Reconnect piano" button (calls `reconnectMidi`) next to the piano line; show `error` when set.
 Files: `src/main/audio.ts` / `src/main/audioController.ts` (start MIDI at launch, stop before quit), `src/main/ipc.ts` (`midi:status`; forward events to the window with `webContents.send('midi:event', batch)`), `src/preload/index.ts` + `index.d.ts` (`pianoLearner.midi.{status,onEvents}`, `onEvents` returns an unsubscribe function), `src/shared/audio.ts` (types), `src/renderer/src/screens/Sound.tsx` + css + `soundText.ts` (a "Piano" section: "Piano connected: Digital Piano" with ✓, or "No piano found. Check that the piano is on and the USB cable is plugged in." with ○; "Last key: C4, loudness 64 of 127" when a key is played), `e2e/app.spec.ts` (bridge now `audio, midi, version`; the Sound screen shows the no-piano state), tests for note names (`noteName(60) === 'C4'`, `noteName(61) === 'C#4'`, 21 → 'A0', 108 → 'C8').
 Acceptance: `npm test`, `npm run lint`, `npm run build`, `xvfb-run -a npm run test:e2e` pass; screenshots light and dark of the Sound screen.
 
@@ -39,3 +40,4 @@ Acceptance: `npm test`, `npm run lint`, `npm run build`, `xvfb-run -a npm run te
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
 | 1 | builder-plus (Sonnet) | 2 | FAIL (same-callback tap silent), then PASS. Later (task 3): a re-press also fades same-note voices already in release; headroom/limiter with the sampler. |
+| 2 | builder-plus (Sonnet) | 1 + follow-ups | PASS, follow-ups PASS (open by name, error in status, reconnectMidi, forwarder wake, split drop counters). Untested here: real MIDI port and JS delivery (no ports in the cloud); checked at Bar's gate. |

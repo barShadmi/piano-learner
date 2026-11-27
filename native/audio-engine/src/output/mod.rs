@@ -2,7 +2,8 @@
 //! render thread. Nothing here is called from the audio callback except the
 //! small pure helpers.
 
-use crate::core::{self, Command, EngineStats};
+use crate::core::{Command, EngineStats};
+use crate::midi::{MidiSink, MIDI_CAPACITY};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -231,8 +232,28 @@ where
     }
 }
 
+/// The rings the render thread reads: commands from the control side, and
+/// notes from the MIDI thread (a ring of its own, so it has one producer).
+pub struct Inbox {
+    pub commands: rtrb::Consumer<Command>,
+    pub midi: rtrb::Consumer<Command>,
+}
+
+/// The other ends of an `Inbox`.
+pub struct Outbox {
+    pub commands: rtrb::Producer<Command>,
+    pub midi: rtrb::Producer<Command>,
+}
+
+/// New rings for one output start.
+pub fn rings(command_capacity: usize, midi_capacity: usize) -> (Outbox, Inbox) {
+    let (commands_tx, commands_rx) = rtrb::RingBuffer::new(command_capacity);
+    let (midi_tx, midi_rx) = rtrb::RingBuffer::new(midi_capacity);
+    (Outbox { commands: commands_tx, midi: midi_tx }, Inbox { commands: commands_rx, midi: midi_rx })
+}
+
 /// What a backend hands back once it plays.
-pub type Opened = (Running, StartInfo, rtrb::Producer<Command>);
+pub type Opened = (Running, StartInfo, Outbox);
 
 /// Open the output the config asks for, falling back from exclusive to shared
 /// on Windows.
@@ -275,7 +296,7 @@ fn open_cpal(
         return Err("ASIO is not available in this version of Piano Learner.".to_string());
     }
     let attempt = |prefer_default: bool| {
-        let (tx, rx) = core::channel(COMMAND_CAPACITY);
+        let (tx, rx) = rings(COMMAND_CAPACITY, MIDI_CAPACITY);
         let stats = Arc::clone(stats);
         let device = device.clone();
         let (running, info) = spawn_backend("audio-cpal", move |stop, ready| {
@@ -300,7 +321,7 @@ fn open_wasapi(
     exclusive: bool,
     stats: &Arc<EngineStats>,
 ) -> Result<Opened, String> {
-    let (tx, rx) = core::channel(COMMAND_CAPACITY);
+    let (tx, rx) = rings(COMMAND_CAPACITY, MIDI_CAPACITY);
     let stats = Arc::clone(stats);
     let (running, info) = spawn_backend("audio-wasapi", move |stop, ready| {
         wasapi_exclusive::run(device, frames, exclusive, rx, stats, stop, ready)
@@ -328,6 +349,7 @@ pub struct Engine {
     stats: Arc<EngineStats>,
     state: Mutex<State>,
     starting: AtomicBool,
+    midi: Arc<MidiSink>,
 }
 
 impl Default for Engine {
@@ -351,7 +373,14 @@ impl Engine {
             stats: Arc::new(EngineStats::default()),
             state: Mutex::new(State { volume: 1.0, generation: 0, session: None }),
             starting: AtomicBool::new(false),
+            midi: Arc::new(MidiSink::default()),
         }
+    }
+
+    /// Where the MIDI thread sends notes. It points at the running output's
+    /// MIDI ring, and at nothing while no output runs.
+    pub fn midi_sink(&self) -> &Arc<MidiSink> {
+        &self.midi
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -391,11 +420,13 @@ impl Engine {
             let mut st = self.state();
             (st.session.take(), st.generation)
         };
+        self.midi.set(None);
         if let Some(old) = old {
             old.running.stop();
         }
         self.stats.reset();
-        let (running, info, mut commands) = opener(cfg, &self.stats)?;
+        let (running, info, outbox) = opener(cfg, &self.stats)?;
+        let Outbox { mut commands, midi } = outbox;
         let mut st = self.state();
         if st.generation != generation {
             drop(st);
@@ -407,6 +438,7 @@ impl Engine {
             let _ = commands.push(Command::SetMasterVolume(st.volume));
         }
         st.session = Some(Session { running, info: info.clone(), commands });
+        self.midi.set(Some(midi));
         Ok(info)
     }
 
@@ -418,6 +450,7 @@ impl Engine {
             st.generation += 1;
             st.session.take()
         };
+        self.midi.set(None);
         if let Some(s) = old {
             s.running.stop();
             self.stats.running.store(false, Ordering::Release);
@@ -566,7 +599,7 @@ mod tests {
         name: &'static str,
     ) -> impl FnOnce(&StartConfig, &Arc<EngineStats>) -> Result<Opened, String> {
         move |_cfg, _stats| {
-            let (tx, _rx) = core::channel(8);
+            let (tx, _rx) = rings(8, 8);
             log.lock().unwrap().push(format!("open {name}"));
             let thread_log = Arc::clone(&log);
             let (running, info) = spawn_backend("fake", move |stop, ready| {
@@ -586,6 +619,44 @@ mod tests {
             })?;
             Ok((running, info, tx))
         }
+    }
+
+    /// An opener whose MIDI consumer the test keeps.
+    fn midi_opener(
+        slot: Arc<Mutex<Option<rtrb::Consumer<Command>>>>,
+    ) -> impl FnOnce(&StartConfig, &Arc<EngineStats>) -> Result<Opened, String> {
+        move |_cfg, _stats| {
+            let (out, inbox) = rings(8, 8);
+            *slot.lock().unwrap() = Some(inbox.midi);
+            let (running, info) = spawn_backend("fake", move |stop, ready| {
+                let _keep = inbox.commands;
+                let _ = ready.send(Ok(fake_info("fake")));
+                while !stop.load(Ordering::Acquire) {
+                    thread::park_timeout(Duration::from_millis(20));
+                }
+            })?;
+            Ok((running, info, out))
+        }
+    }
+
+    #[test]
+    fn each_start_hands_a_fresh_midi_ring_to_the_midi_side() {
+        let e = Engine::new();
+        let key = Command::NoteOn { note: 60, velocity: 90 };
+        let first = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), midi_opener(Arc::clone(&first))).unwrap();
+        assert!(e.midi_sink().push(key));
+        let second = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), midi_opener(Arc::clone(&second))).unwrap();
+        assert!(e.midi_sink().push(key));
+        let mut first = first.lock().unwrap().take().unwrap();
+        let mut second = second.lock().unwrap().take().unwrap();
+        assert_eq!(first.pop(), Ok(key));
+        assert!(first.pop().is_err(), "the old ring gets nothing after the restart");
+        assert_eq!(second.pop(), Ok(key));
+        e.stop();
+        assert!(e.midi_sink().push(key), "after stop there is no output to send to, not an error");
+        assert!(second.pop().is_err(), "nothing reaches a stopped output");
     }
 
     #[test]
@@ -675,7 +746,7 @@ mod tests {
         opening: mpsc::Sender<()>,
     ) -> impl FnOnce(&StartConfig, &Arc<EngineStats>) -> Result<Opened, String> {
         move |_cfg, _stats| {
-            let (tx, _rx) = core::channel(8);
+            let (tx, _rx) = rings(8, 8);
             let _ = opening.send(());
             let _ = gate.recv();
             let (running, info) = spawn_backend("slow", |stop, ready| {

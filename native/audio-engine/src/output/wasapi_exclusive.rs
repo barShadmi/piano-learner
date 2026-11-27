@@ -4,8 +4,8 @@
 //! The render loop (`render_loop`) never allocates, locks or logs: buffers are
 //! made before it starts and everything it touches is owned by this thread.
 
-use super::{align_period, f32_to_i16, f32_to_i24_in_i32, f32_to_i32, friendly_hresult, OutputDevice, StartInfo};
-use crate::core::{Command, EngineCore, EngineStats, Mixer};
+use super::{align_period, f32_to_i16, f32_to_i24_in_i32, f32_to_i32, friendly_hresult, Inbox, OutputDevice, StartInfo};
+use crate::core::{EngineCore, EngineStats, Mixer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -238,13 +238,13 @@ pub fn run(
     device_id: Option<String>,
     frames: u32,
     exclusive: bool,
-    commands: rtrb::Consumer<Command>,
+    inbox: Inbox,
     stats: Arc<EngineStats>,
     stop: Arc<AtomicBool>,
     ready: mpsc::Sender<Result<StartInfo, String>>,
 ) {
     let com_ok = wasapi::initialize_mta().is_ok();
-    run_with_com(device_id.as_deref(), frames, exclusive, commands, &stats, &stop, &ready);
+    run_with_com(device_id.as_deref(), frames, exclusive, inbox, &stats, &stop, &ready);
     if com_ok {
         wasapi::deinitialize();
     }
@@ -254,7 +254,7 @@ fn run_with_com(
     device_id: Option<&str>,
     frames: u32,
     exclusive: bool,
-    commands: rtrb::Consumer<Command>,
+    inbox: Inbox,
     stats: &Arc<EngineStats>,
     stop: &AtomicBool,
     ready: &mpsc::Sender<Result<StartInfo, String>>,
@@ -282,7 +282,7 @@ fn run_with_com(
         return;
     }
     let backend = if exclusive { "wasapi-exclusive" } else { "wasapi-shared" };
-    let core = EngineCore::new(commands, Mixer::new(stream.sample_rate, stream.channels));
+    let core = EngineCore::with_midi(inbox.commands, inbox.midi, Mixer::new(stream.sample_rate, stream.channels));
     let info = StartInfo {
         backend: backend.to_string(),
         device_name: stream.device_name.clone(),
