@@ -42,13 +42,14 @@
   background: var(--text-muted);
 }
 
-/* The song's hands: soft fill, a bar along the bottom, and a letter on white keys. */
+/* The song's hands: the full hand colour, the same as the falling note that lands on the key,
+   a bar along the bottom, and a letter on white keys. */
 .key[data-state='right'] {
-  background: var(--hand-right-soft);
+  background: var(--hand-right);
 }
 
 .key[data-state='left'] {
-  background: var(--hand-left-soft);
+  background: var(--hand-left);
 }
 
 .bar {
@@ -57,11 +58,7 @@
   right: 0;
   bottom: 0;
   height: var(--space-2);
-  background: var(--hand-right);
-}
-
-.key[data-state='left'] .bar {
-  background: var(--hand-left);
+  background: var(--text-muted);
 }
 
 .letter {
@@ -73,11 +70,8 @@
   font-size: var(--text-sm);
   font-weight: 600;
   line-height: 1;
-  color: var(--hand-right);
-}
-
-.key[data-state='left'] .letter {
-  color: var(--hand-left);
+  /* --on-accent reads on both: white on the dark hand colours (light theme), dark on the light ones (dark theme). */
+  color: var(--on-accent);
 }
 
 /* The dot sits near the bottom edge. It uses --on-accent: a white dot on the dark grey fill (light theme),

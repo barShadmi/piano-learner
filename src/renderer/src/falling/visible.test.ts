@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Song } from '../../../shared/song/types'
 import { songNotesInSeconds, type NoteTiming, type TimedNotes } from './songTime'
-import { noteRect, soundingNotes, visibleRange } from './visible'
+import { noteRect, soundingNotes, visibleFrom, visibleRange, visibleTo, startedBy } from './visible'
 
 function makeSong(overrides: Partial<Song> = {}): Song {
   return {
@@ -193,5 +193,27 @@ describe('noteRect', () => {
     const white = noteRect(timedFor(60, 0, 1), 0, lookaheadS, widthPx, heightPx)
     const black = noteRect(timedFor(61, 0, 1), 0, lookaheadS, widthPx, heightPx)
     expect(black.w).toBeLessThan(white.w)
+  })
+})
+
+describe('the number-only range functions (no array per call)', () => {
+  it('visibleFrom and visibleTo give the same range as visibleRange', () => {
+    const timed = randomTimedSong(500, 7)
+    const rnd = prng(11)
+    for (let k = 0; k < 100; k++) {
+      const nowS = rnd() * 60
+      const [from, to] = visibleRange(timed, nowS, 3)
+      expect(visibleFrom(timed, nowS)).toBe(from)
+      expect(Math.max(from, visibleTo(timed, nowS, 3))).toBe(to)
+    }
+  })
+
+  it('startedBy counts the notes that start at or before nowS', () => {
+    const timed = randomTimedSong(300, 3)
+    const rnd = prng(5)
+    for (let k = 0; k < 50; k++) {
+      const nowS = rnd() * 60
+      expect(startedBy(timed, nowS)).toBe(timed.notes.filter((n) => n.startS <= nowS).length)
+    }
   })
 })

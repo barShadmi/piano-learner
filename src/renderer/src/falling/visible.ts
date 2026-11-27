@@ -33,12 +33,25 @@ export function visibleRange(
   nowS: number,
   lookaheadS: number
 ): [number, number] {
-  const { notes, maxDurationS } = timed
+  const from = visibleFrom(timed, nowS)
+  return [from, Math.max(from, visibleTo(timed, nowS, lookaheadS))]
+}
+
+/** The start of visibleRange as a plain number (no array), for the draw loop. */
+export function visibleFrom(timed: TimedNotes, nowS: number): number {
   // A note that started before nowS - maxDurationS has ended by nowS.
-  const from = firstStartAfter(notes, nowS - maxDurationS - EPS)
+  return firstStartAfter(timed.notes, nowS - timed.maxDurationS - EPS)
+}
+
+/** The end of visibleRange as a plain number. It can be below visibleFrom; take the larger of the two. */
+export function visibleTo(timed: TimedNotes, nowS: number, lookaheadS: number): number {
   // A note that starts at or after nowS + lookaheadS is not yet visible.
-  const to = lowerBoundStart(notes, nowS + lookaheadS)
-  return [from, Math.max(from, to)]
+  return lowerBoundStart(timed.notes, nowS + lookaheadS)
+}
+
+/** How many notes start at or before nowS (the index after the last of them). */
+export function startedBy(timed: TimedNotes, nowS: number): number {
+  return firstStartAfter(timed.notes, nowS)
 }
 
 // First index whose startS is at least `value` (or the length if none).

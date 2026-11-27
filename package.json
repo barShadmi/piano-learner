@@ -19,6 +19,7 @@
     "dist:win": "npm run build:native:asio && npm run typecheck && electron-vite build && electron-builder --win nsis --publish never"
   },
   "dependencies": {
+    "pixi.js": "8.22.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
