@@ -39,16 +39,27 @@ pub fn channel(capacity: usize) -> (rtrb::Producer<Command>, rtrb::Consumer<Comm
 /// Owned by the render thread: drains commands, then renders.
 pub struct EngineCore {
     commands: rtrb::Consumer<Command>,
+    /// Notes from the MIDI thread, which is the only producer of this ring.
+    midi: rtrb::Consumer<Command>,
     mixer: Mixer,
 }
 
 impl EngineCore {
+    /// A core with no MIDI source (an empty ring that nobody writes to).
     pub fn new(commands: rtrb::Consumer<Command>, mixer: Mixer) -> Self {
-        Self { commands, mixer }
+        let (_unused_producer, midi) = channel(1);
+        Self::with_midi(commands, midi, mixer)
+    }
+
+    pub fn with_midi(commands: rtrb::Consumer<Command>, midi: rtrb::Consumer<Command>, mixer: Mixer) -> Self {
+        Self { commands, midi, mixer }
     }
 
     pub fn process(&mut self, out: &mut [f32]) {
         while let Ok(cmd) = self.commands.pop() {
+            self.mixer.handle(cmd);
+        }
+        while let Ok(cmd) = self.midi.pop() {
             self.mixer.handle(cmd);
         }
         self.mixer.render(out);
@@ -56,8 +67,11 @@ impl EngineCore {
 }
 
 mod command;
+pub mod midi_msg;
 mod mixer;
 mod tone;
+pub mod velocity;
+mod voice;
 
 #[cfg(test)]
 mod tests {
@@ -71,6 +85,40 @@ mod tests {
         let mut out = [0.0f32; 2 * 480];
         core.process(&mut out);
         assert!(out.iter().any(|s| s.abs() > 0.01), "tone should be audible");
+    }
+
+    #[test]
+    fn process_plays_notes_from_the_midi_ring() {
+        let (_tx, rx) = channel(16);
+        let (mut midi_tx, midi_rx) = channel(16);
+        let mut core = EngineCore::with_midi(rx, midi_rx, Mixer::new(48_000, 2));
+        midi_tx.push(Command::NoteOn { note: 69, velocity: 100 }).unwrap();
+        let mut out = [0.0f32; 2 * 480];
+        core.process(&mut out);
+        assert!(out.iter().any(|s| s.abs() > 0.01), "note should be audible");
+    }
+
+    #[test]
+    fn both_rings_are_drained_every_process_call() {
+        let (mut tx, rx) = channel(16);
+        let (mut midi_tx, midi_rx) = channel(16);
+        let mut core = EngineCore::with_midi(rx, midi_rx, Mixer::new(48_000, 1));
+        tx.push(Command::SetMasterVolume(0.0)).unwrap();
+        midi_tx.push(Command::NoteOn { note: 60, velocity: 127 }).unwrap();
+        let mut out = [0.0f32; 4800];
+        core.process(&mut out);
+        assert!(out[480..].iter().all(|s| *s == 0.0), "master volume from the command ring applies");
+        assert!(tx.slots() == 16 && midi_tx.slots() == 16, "both rings emptied");
+    }
+
+    #[test]
+    fn new_keeps_working_without_a_midi_ring() {
+        let (mut tx, rx) = channel(16);
+        let mut core = EngineCore::new(rx, Mixer::new(48_000, 1));
+        tx.push(Command::NoteOn { note: 69, velocity: 100 }).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert!(out.iter().any(|s| s.abs() > 0.01));
     }
 
     #[test]

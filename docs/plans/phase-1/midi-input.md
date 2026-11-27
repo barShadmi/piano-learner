@@ -38,3 +38,4 @@ Acceptance: `npm test`, `npm run lint`, `npm run build`, `xvfb-run -a npm run te
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder-plus (Sonnet) | 2 | FAIL (same-callback tap silent), then PASS. Later (task 3): a re-press also fades same-note voices already in release; headroom/limiter with the sampler. |
