@@ -163,7 +163,7 @@ test('the Play screen opens from the library, shows 88 keys, and goes back by ke
     await window.waitForLoadState('domcontentloaded')
 
     await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
-    await expect(window.getByRole('heading', { name: 'Play', level: 1 })).toBeVisible()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
     await expect(window.getByRole('img', { name: 'Piano keyboard' })).toBeVisible()
     await expect(window.locator('[data-note]')).toHaveCount(88)
@@ -191,7 +191,7 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
     await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
     await window.getByRole('link', { name: 'Back to your songs' }).click()
     await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
-    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
     await expect(window.getByText('The falling notes could not start on this PC.')).toHaveCount(0)
 
     const notes = window.locator('[data-frames]')
@@ -268,7 +268,7 @@ test('Listen asks for the song to be heard; with no sound it says why and the fa
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
-    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
     await expect(window.getByRole('button', { name: 'Listen', exact: true })).toBeVisible()
     const frames = async (): Promise<number> =>
@@ -309,7 +309,7 @@ test('Watch during Listen silences it: a waiting start is cancelled and no sound
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
-    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
     await expect(window.getByRole('status').filter({ hasText: 'Playing with sound.' })).toBeVisible()
@@ -332,7 +332,7 @@ test('Watch clears the sound message that Listen showed', async () => {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
-    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
     await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
@@ -508,7 +508,7 @@ test('Import file adds a MIDI song to the library, and it opens on Play', async 
     }
 
     await row.getByRole('link', { name: 'Play E2E Tune', exact: true }).click()
-    await expect(window.getByText('Song: E2E Tune')).toBeVisible()
+    await expect(window.getByRole('heading', { name: 'E2E Tune', level: 1 })).toBeVisible()
   } finally {
     await app.close()
     fs.rmSync(fixtures, { recursive: true, force: true })
@@ -546,6 +546,26 @@ test('a song that is not in the library says so on Play, with a way back', async
     await expect(window.getByText('This song could not be found.')).toBeVisible()
     await window.getByRole('link', { name: 'Back to your songs' }).click()
     await expect(window.getByRole('heading', { name: 'Your songs' })).toBeVisible()
+  } finally {
+    await app.close()
+  }
+})
+
+test('at the smallest window the falling notes area is at least 240 px tall', async () => {
+  const app = await launch()
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(1024, 640)
+    })
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
+    await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
+    await window.waitForTimeout(500)
+    const height = await window.locator('[data-frames]').evaluate((el) => el.getBoundingClientRect().height)
+    expect(height).toBeGreaterThanOrEqual(240)
+    // The hint stays visible.
+    await expect(window.getByText('Listen plays the song with sound. Watch shows the notes only.')).toBeVisible()
   } finally {
     await app.close()
   }

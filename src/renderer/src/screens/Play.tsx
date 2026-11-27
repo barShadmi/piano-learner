@@ -56,7 +56,7 @@ export default function Play({ songId }: { songId?: string }) {
     <main className={styles.screen}>
       <div className={styles.header}>
         <h1 className={styles.title} id="play-title">
-          Play
+          {loaded.kind === 'ready' ? loaded.song.title : 'Play'}
         </h1>
         <a href="#/" className="button">
           Back to your songs
@@ -255,12 +255,21 @@ function PlaySong({ song }: { song: Song }) {
 
   return (
     <>
-      <p className={styles.statusLine} role="status">
-        {connected ? 'Piano connected.' : pianoLine(piano)}
-      </p>
+      <div className={styles.infoLine}>
+        <p className={styles.compact}>
+          {connected ? 'Piano connected.' : pianoLine(piano)}
+          <span className={styles.sep} aria-hidden="true">
+            ·
+          </span>
+          <span aria-hidden="true" className={styles.glyph}>
+            {keys.pedal ? '●' : '○'}
+          </span>
+          {keys.pedal ? 'Pedal: down' : 'Pedal: up'}
+        </p>
+        <p className={styles.compact}>Listen plays the song with sound. Watch shows the notes only.</p>
+      </div>
 
       <div className={styles.songStrip}>
-        <p className={styles.songTitle}>Song: {song.title}</p>
         <button
           type="button"
           className="button"
@@ -290,10 +299,6 @@ function PlaySong({ song }: { song: Song }) {
         <button type="button" className="button button-secondary" onClick={backToStart}>
           Restart song
         </button>
-      </div>
-      <p className={styles.hint}>Listen plays the song with sound. Watch shows the notes only.</p>
-
-      <div className={styles.messages}>
         <div className={styles.soundLine}>
           <p className={styles.soundReason} role="status">
             {view.status}
@@ -304,18 +309,12 @@ function PlaySong({ song }: { song: Song }) {
             </a>
           ) : null}
         </div>
-        {plan.cut ? (
-          <p className={styles.soundReason}>Listen plays only the first part of this long song.</p>
-        ) : null}
       </div>
+      {plan.cut ? (
+        <p className={styles.compact}>Listen plays only the first part of this long song.</p>
+      ) : null}
 
       <div className={styles.bottom}>
-        <p className={styles.pedal}>
-          <span aria-hidden="true" className={styles.glyph}>
-            {keys.pedal ? '●' : '○'}
-          </span>
-          {keys.pedal ? 'Pedal: down' : 'Pedal: up'}
-        </p>
         <div className={styles.stage}>
           <p className={styles.legend}>Blue = right hand (R, or a stripe on the right edge) · Orange = left hand (L, or a stripe on the left edge)</p>
           <FallingNotes timed={timed} clock={clock} onSounding={setSongLit} endS={endS} onEnd={onEnd} />
