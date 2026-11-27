@@ -257,6 +257,84 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
   }
 })
 
+test('Listen asks for the song to be heard; with no sound it says why and the falling notes still run', async () => {
+  test.setTimeout(60_000)
+  const app = await launch()
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+
+    await expect(window.getByRole('button', { name: 'Listen', exact: true })).toBeVisible()
+    const frames = async (): Promise<number> =>
+      Number(await window.locator('[data-frames]').getAttribute('data-frames'))
+    await expect.poll(frames, { timeout: 15_000 }).toBeGreaterThan(0)
+
+    // This container has no sound card, so the engine is not on and the song cannot be heard.
+    await window.getByRole('button', { name: 'Listen', exact: true }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
+      timeout: 10_000
+    })
+    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveAttribute('href', '#/sound')
+
+    // The notes keep falling without sound.
+    const before = await frames()
+    await expect.poll(frames, { timeout: 3000 }).toBeGreaterThan(before)
+
+    // Leaving the screen works while the song is on.
+    await window.getByRole('link', { name: 'Back to your songs' }).click()
+    await expect(window.getByRole('heading', { name: 'Your songs' })).toBeVisible()
+  } finally {
+    await app.close()
+  }
+})
+
+// The sample starts 2 s before its first note, so Listen begins in the lead-in: the engine start waits 2 s.
+test('Start during Listen silences it: a waiting start is cancelled and no sound message appears', async () => {
+  test.setTimeout(60_000)
+  const app = await launch()
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+
+    await window.getByRole('button', { name: 'Listen', exact: true }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Listening…' })).toBeVisible()
+    await window.getByRole('button', { name: 'Start', exact: true }).click()
+
+    // Waiting past the lead-in: the cancelled start never reaches the engine, so nothing is reported.
+    await expect(window.getByRole('status').filter({ hasText: 'Listening…' })).toHaveCount(0)
+    await window.waitForTimeout(3000)
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
+    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveCount(0)
+  } finally {
+    await app.close()
+  }
+})
+
+test('Start clears the sound message that Listen showed', async () => {
+  test.setTimeout(60_000)
+  const app = await launch()
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+
+    await window.getByRole('button', { name: 'Listen', exact: true }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
+      timeout: 10_000
+    })
+    await window.getByRole('button', { name: 'Start', exact: true }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
+    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveCount(0)
+  } finally {
+    await app.close()
+  }
+})
+
 test('the Delay test opens from Sound, says there is no piano, and saves a report', async () => {
   const app = await launch()
   try {

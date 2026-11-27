@@ -9,6 +9,8 @@ export interface NoteTiming {
   pitch: number
   hand: Hand
   finger?: Finger
+  /** 1..127, when the note has one. */
+  velocity?: number
   startS: number
   endS: number
 }
@@ -89,6 +91,7 @@ export function songNotesInSeconds(song: Song): TimedNotes {
       endS: beatToSecondsIn(segs, n.start + n.duration)
     }
     if (n.finger !== undefined) timing.finger = n.finger
+    if (n.velocity !== undefined) timing.velocity = n.velocity
     return timing
   })
   notes.sort((a, b) => a.startS - b.startS || a.pitch - b.pitch)

@@ -159,3 +159,17 @@ describe('songLengthSeconds', () => {
     expect(songLengthSeconds(makeSong())).toBe(0)
   })
 })
+
+describe('songNotesInSeconds keeps the velocity', () => {
+  it('copies a note velocity, and leaves it out when the note has none', () => {
+    const song = makeSong({
+      notes: [
+        { id: 'a', pitch: 60, start: 0, duration: 1, hand: 'right', velocity: 99 },
+        { id: 'b', pitch: 62, start: 1, duration: 1, hand: 'left' }
+      ]
+    })
+    const { notes } = songNotesInSeconds(song)
+    expect(notes[0].velocity).toBe(99)
+    expect('velocity' in notes[1]).toBe(false)
+  })
+})

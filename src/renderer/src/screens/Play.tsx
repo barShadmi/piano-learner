@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MidiStatusReply } from '../../../shared/audio'
 import { validateSong, type Hand, type Song } from '../../../shared/song'
 import sampleJson from '../../../shared/song/samples/canon-opening.json'
 import { SongClock } from '../falling/clock'
 import FallingNotes from '../falling/FallingNotes'
+import { correction } from '../falling/follow'
+import { songEventsPlan } from '../falling/songEvents'
 import { songLengthSeconds, songNotesInSeconds } from '../falling/songTime'
 import { mergeLit } from '../keyboard/lit'
 import { applyEvents, keysDownLine, type KeysState } from '../keyboard/keysDown'
@@ -78,6 +80,8 @@ export default function Play({ songId }: { songId?: string }) {
 // It is keyed by song id, so each song starts with its own clock.
 function PlaySong({ song }: { song: Song }) {
   const timed = useMemo(() => songNotesInSeconds(song), [song])
+  const plan = useMemo(() => songEventsPlan(timed), [timed])
+  const songEvents = plan.events
   const startS = timed.notes.length > 0 ? timed.notes[0].startS - LEAD_IN_S : 0
   const endS = useMemo(() => songLengthSeconds(song), [song])
 
@@ -91,17 +95,117 @@ function PlaySong({ song }: { song: Song }) {
     return c
   })
 
+  // Listen mode. `listening` is true while the engine is meant to be playing the song.
+  // `session` changes whenever Listen starts or stops, so a late answer from an older press is ignored.
+  // `leadInTimer` starts the engine song when the lead-in (before time 0) ends.
+  const [listening, setListening] = useState(false)
+  // Plain reason when the engine could not play the song. The notes keep falling.
+  const [heard, setHeard] = useState<string | undefined>(undefined)
+  const session = useRef(0)
+  const leadInTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // Stops the engine song and any start that is still waiting. Silent when nothing plays.
+  const stopListening = useCallback(() => {
+    session.current++
+    clearTimeout(leadInTimer.current)
+    leadInTimer.current = undefined
+    setListening(false)
+    setHeard(undefined)
+    window.pianoLearner.song.stop().then(
+      () => undefined,
+      () => undefined
+    )
+  }, [])
+
+  // Leaving the screen stops the engine song.
+  useEffect(() => {
+    return () => stopListening()
+  }, [stopListening])
+
+  const listen = useCallback(() => {
+    const mine = ++session.current
+    clearTimeout(leadInTimer.current)
+    leadInTimer.current = undefined
+    setHeard(undefined)
+    setListening(true)
+
+    let fromS = clock.nowSeconds()
+    if (fromS >= endS) {
+      clock.seek(startS)
+      fromS = startS
+    }
+
+    // The clock is started whatever the engine says: the notes keep falling without sound.
+    const answer = (reply: { ok: true } | { ok: false; error: string }): void => {
+      if (mine !== session.current) return
+      if (reply.ok) {
+        setHeard(undefined)
+      } else {
+        setListening(false)
+        setHeard(reply.error)
+      }
+      clock.play(1)
+    }
+    const send = (fromMs: number): void => {
+      window.pianoLearner.song.play(songEvents, fromMs).then(answer, () =>
+        answer({ ok: false, error: 'The song could not start.' })
+      )
+    }
+
+    if (fromS < 0) {
+      // In the lead-in the clock starts now, and the engine starts when the clock reaches 0.
+      clock.play(1)
+      leadInTimer.current = setTimeout(
+        () => {
+          leadInTimer.current = undefined
+          if (mine !== session.current) return
+          send(Math.max(0, clock.nowSeconds() * 1000))
+        },
+        -fromS * 1000
+      )
+    } else {
+      send(fromS * 1000)
+    }
+  }, [clock, endS, startS, songEvents])
+
   const start = useCallback(() => {
+    // Watch only: Start always silences a Listen that is on or waiting to begin.
+    stopListening()
     // After the end, Start begins again from the lead-in.
     if (clock.nowSeconds() >= endS) clock.seek(startS)
     clock.play(1)
-  }, [clock, startS, endS])
-  const pause = useCallback(() => clock.pause(), [clock])
+  }, [clock, startS, endS, stopListening])
+  const pause = useCallback(() => {
+    clock.pause()
+    stopListening()
+  }, [clock, stopListening])
   const backToStart = useCallback(() => {
     clock.pause()
+    stopListening()
     clock.seek(startS)
-  }, [clock, startS])
-  const onEnd = useCallback(() => clock.pause(), [clock])
+  }, [clock, startS, stopListening])
+  const onEnd = useCallback(() => {
+    clock.pause()
+    stopListening()
+  }, [clock, stopListening])
+
+  // While Listen plays, check the engine's position every second and move the clock if it drifted.
+  useEffect(() => {
+    if (!listening) return
+    const timer = setInterval(() => {
+      const mine = session.current
+      const clockAtAsk = clock.nowSeconds()
+      window.pianoLearner.song.position().then(
+        (reply) => {
+          if (!reply.ok || mine !== session.current || !clock.isPlaying) return
+          const next = correction(clockAtAsk, reply.positionMs)
+          if (next !== undefined) clock.seek(next)
+        },
+        () => undefined
+      )
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [listening, clock])
 
   // Check the piano now, and again every 2 seconds. When the piano is not connected, every key and the pedal go up.
   const askPiano = useCallback(() => {
@@ -141,6 +245,9 @@ function PlaySong({ song }: { song: Song }) {
         <button type="button" className="button" onClick={start}>
           Start
         </button>
+        <button type="button" className="button" onClick={listen}>
+          Listen
+        </button>
         <button type="button" className="button" onClick={pause}>
           Pause
         </button>
@@ -148,6 +255,27 @@ function PlaySong({ song }: { song: Song }) {
           Back to the start
         </button>
       </div>
+
+      {listening && heard === undefined ? (
+        <p className={styles.soundReason} role="status">
+          Listening…
+        </p>
+      ) : null}
+      {heard !== undefined ? (
+        <div className={styles.soundLine}>
+          <p className={styles.soundReason} role="status">
+            {heard}
+          </p>
+          <a href="#/sound" className="button">
+            Open Sound settings
+          </a>
+        </div>
+      ) : null}
+      {plan.cut ? (
+        <p className={styles.soundReason} role="status">
+          This song is too long to play to the end.
+        </p>
+      ) : null}
 
       <div className={styles.bottom}>
         <p className={styles.pedal}>
