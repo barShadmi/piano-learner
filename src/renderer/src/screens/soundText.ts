@@ -5,7 +5,7 @@ import { modeWords } from '../../../shared/modes'
 export function statusLine(state: AudioState): string {
   switch (state.phase) {
     case 'starting':
-      return 'Starting sound…'
+      return state.piano === 'loading' ? 'Getting the piano sound ready…' : 'Starting sound…'
     case 'off':
       return 'Sound is off.'
     case 'failed':
@@ -74,14 +74,14 @@ export function lastKeyLine(event: MidiEvent | undefined): string {
 }
 
 // The line about the sampled piano sound. Without it a simple tone plays.
-export function pianoSoundLine(piano: PianoSound): string {
+export function pianoSoundLine(piano: PianoSound, soundOn = true): string {
   switch (piano) {
     case 'loading':
-      return 'Piano sound is loading…'
+      return soundOn ? 'Piano sound: loading… (you hear a simple tone until it is ready)' : 'Piano sound: loading…'
     case 'ready':
-      return 'Piano sound is ready.'
+      return 'Piano sound: ready'
     case 'failed':
-      return 'Piano sound could not load. You hear a simple tone instead.'
+      return soundOn ? 'Piano sound: could not load. You hear a simple tone instead.' : 'Piano sound: could not load.'
   }
 }
 

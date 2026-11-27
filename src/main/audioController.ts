@@ -97,7 +97,12 @@ function reason(error: unknown, fallback: string): string {
 
 // Keeps the last start result or error so the Sound screen can ask for it at any time.
 // It never throws to its callers: every answer is data. It does no sound work itself.
-export function createAudioController(source: { engine?: FullEngine; loadError?: string }) {
+export function createAudioController(
+  source: { engine?: FullEngine; loadError?: string },
+  options: { restartBackoffMs?: number[]; healthCheckMs?: number } = {}
+) {
+  const restartBackoffMs = options.restartBackoffMs ?? [500, 1000, 2000]
+  const healthCheckMs = options.healthCheckMs ?? 1000
   const engine = source.engine
   const missing = source.loadError ?? 'The sound engine is not available.'
   const midiMissing = 'The piano part of the sound engine is not available.'
@@ -119,14 +124,19 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
   // Set when the saved output was not found and the default output is used. Cleared by the next settings change.
   let settingsNote: string | undefined
 
+  // True while the launch waits for the piano sound before it opens the output. The screen
+  // then says sound is starting, not off.
+  let launching = false
+
   const view = (): AudioState => {
-    const base = settingsNote ? { ...current, settingsNote } : current
+    const shown = launching && current.phase === 'off' ? { phase: 'starting' as const } : current
+    const base = settingsNote ? { ...shown, settingsNote } : shown
     return pianoError ? { ...base, piano, pianoError } : { ...base, piano }
   }
 
   // Forgets the remembered key timings. Never throws.
   const forgetDelays = (): void => {
-    if (!engine || typeof engine.clearLatency !== 'function') return
+    if (!engine || typeof engine.clearLatency !== 'function' || keepDelays) return
     try {
       engine.clearLatency()
     } catch (error) {
@@ -246,6 +256,73 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     return applying
   }
 
+  // Restarts that happened since the output was last seen healthy for a while.
+  let restarts = 0
+  let healthyChecks = 0
+  let checking = false
+  // True during an automatic restart: the delay numbers are kept, not cleared.
+  let keepDelays = false
+  const phaseNow = (): AudioState['phase'] => current.phase
+
+  const stalled = (): boolean => {
+    try {
+      return engine!.status().failed
+    } catch {
+      return false
+    }
+  }
+
+  const stalledReason =
+    'The sound device stopped responding. Press Try again, or set Mode to Shared with other apps.'
+
+  // When the engine says the device stalled or failed while sound is on, restarts the output
+  // through the normal settings path (so it uses the settings Bar has now): up to 3 tries with a
+  // growing wait. If the device still stalls after the last try, the failure is shown (with Try
+  // again). The delay numbers are kept. Never throws.
+  const checkHealth = async (): Promise<void> => {
+    if (checking || !engine || current.phase !== 'on' || pendingStart || applying || !runningConfig) return
+    if (!stalled()) {
+      if (++healthyChecks >= 5) restarts = 0
+      return
+    }
+    healthyChecks = 0
+    checking = true
+    try {
+      const lastConfig = runningConfig
+      let failedByRestart = false
+      while (restarts < restartBackoffMs.length) {
+        const wait = restartBackoffMs[restarts] ?? 0
+        restarts++
+        await new Promise<void>((resolve) => setTimeout(resolve, wait))
+        // Someone else took over during the wait (Mode change, Try again, stop): leave it to them.
+        const phase = phaseNow()
+        const stillOurs = phase === 'on' ? stalled() : failedByRestart && phase === 'failed'
+        if (applying || pendingStart || !stillOurs) return
+        keepDelays = true
+        try {
+          if (wanted) {
+            forceRestart = true
+            await applySettings(wanted)
+          } else {
+            await start(lastConfig)
+          }
+        } finally {
+          keepDelays = false
+        }
+        const after = phaseNow()
+        if (after === 'on' && !stalled()) return
+        failedByRestart = after === 'failed' // a failed restart shows its own reason; try again
+        if (after !== 'on' && after !== 'failed') return
+      }
+      if (phaseNow() === 'on' && stalled()) {
+        current = { phase: 'failed', error: stalledReason }
+        runningConfig = undefined
+      }
+    } finally {
+      checking = false
+    }
+  }
+
   const songMissing = 'The song player of the sound engine is not available.'
 
   // Stops the song and releases its notes. Never throws; nothing playing is not an error.
@@ -293,6 +370,19 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     start,
 
     applySettings,
+
+    setLaunching(on: boolean): void {
+      launching = on
+    },
+
+    checkHealth,
+
+    // Looks at the output now and then, and restarts it if the device stalled.
+    // Returns a function that stops the looking.
+    watchHealth(): () => void {
+      const timer = setInterval(() => void checkHealth(), healthCheckMs)
+      return () => clearInterval(timer)
+    },
 
     // Try again: starts sound with these settings even when they match the running sound
     // (a failed start, or a fallback mode). While a pass is running it only asks that pass for a

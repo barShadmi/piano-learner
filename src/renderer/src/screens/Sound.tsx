@@ -252,7 +252,7 @@ export default function Sound() {
           {pianoSoundBadge[pianoSound].label}
         </p>
         <p className={styles.statusLine} role="status">
-          {pianoSoundLine(pianoSound)}
+          {pianoSoundLine(pianoSound, state.phase === 'on')}
         </p>
         {pianoSound === 'failed' ? (
           <p className={styles.reason}>

@@ -22,7 +22,8 @@ import type { OutputDevice } from '../../../shared/audio'
 
 describe('statusLine', () => {
   it('says what is happening for each phase', () => {
-    expect(statusLine({ phase: 'starting', piano: 'loading' })).toBe('Starting sound…')
+    expect(statusLine({ phase: 'starting', piano: 'ready' })).toBe('Starting sound…')
+    expect(statusLine({ phase: 'starting', piano: 'loading' })).toBe('Getting the piano sound ready…')
     expect(statusLine({ phase: 'off', piano: 'loading' })).toBe('Sound is off.')
     expect(statusLine({ phase: 'failed', error: 'No sound card.', piano: 'loading' })).toBe('Sound could not start.')
   })
@@ -138,11 +139,18 @@ describe('lastKeyLine', () => {
 
 describe('pianoSoundLine', () => {
   it('says the piano sound is loading, ready, or could not load', () => {
-    expect(pianoSoundLine('loading')).toBe('Piano sound is loading…')
-    expect(pianoSoundLine('ready')).toBe('Piano sound is ready.')
-    expect(pianoSoundLine('failed')).toBe(
-      'Piano sound could not load. You hear a simple tone instead.'
+    expect(pianoSoundLine('loading', true)).toBe(
+      'Piano sound: loading… (you hear a simple tone until it is ready)'
     )
+    expect(pianoSoundLine('ready', true)).toBe('Piano sound: ready')
+    expect(pianoSoundLine('failed', true)).toBe(
+      'Piano sound: could not load. You hear a simple tone instead.'
+    )
+  })
+
+  it('does not mention a tone while no sound is playing', () => {
+    expect(pianoSoundLine('loading', false)).toBe('Piano sound: loading…')
+    expect(pianoSoundLine('failed', false)).toBe('Piano sound: could not load.')
   })
 
   it('has the credit line for the sampled piano', () => {

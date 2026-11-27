@@ -4,7 +4,7 @@
 //! The render loop (`render_loop`) never allocates, locks or logs: buffers are
 //! made before it starts and everything it touches is owned by this thread.
 
-use super::{align_period, f32_to_i16, f32_to_i24_in_i32, f32_to_i32, friendly_hresult, Inbox, OutputDevice, StartInfo};
+use super::{align_period, device_stalled, f32_to_i16, f32_to_i24_in_i32, f32_to_i32, friendly_hresult, Inbox, OutputDevice, StartInfo};
 use crate::core::{EngineCore, EngineStats, Mixer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -172,7 +172,8 @@ fn open_exclusive(device: &wasapi::Device, frames: u32, name: &str) -> Result<St
                         Ok(again)
                     });
                     match retry {
-                        Ok(again) => again, // the first client is released here
+                        // The first client is not used again; it is dropped when this scope ends.
+                        Ok(again) => again,
                         Err(e) => {
                             // Release the first client and try the next format.
                             let code = hresult_of(&e);
@@ -389,14 +390,22 @@ fn wait_for_device(event: &Handle, timeout_ms: u32) -> Wait {
 
 /// The audio thread's loop. No allocation, locks or logging in here. A real
 /// timeout counts as an underrun; a failed wait or write ends the loop and
-/// marks the engine as failed instead of spinning.
+/// marks the engine as failed instead of spinning. Two timeouts in a row mean
+/// a stalled device (in exclusive mode it would repeat its last buffer as a
+/// buzz): the loop ends and the engine is marked failed so the app restarts it.
 fn render_loop(s: &Stream, buffers: &mut Buffers, core: &mut EngineCore, stats: &EngineStats, stop: &AtomicBool) {
+    let mut timeouts = 0u32;
     while !stop.load(Ordering::Acquire) {
         match wait_for_device(&s.event, EVENT_WAIT_MS) {
-            Wait::Ready => {}
+            Wait::Ready => timeouts = 0,
             Wait::TimedOut => {
                 // The device did not ask for data in time: count it as a glitch.
                 stats.underruns.fetch_add(1, Ordering::Relaxed);
+                timeouts += 1;
+                if device_stalled(timeouts) {
+                    stats.failed.store(true, Ordering::Release);
+                    break;
+                }
                 continue;
             }
             Wait::Failed => {

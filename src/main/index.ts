@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { isAppUrl } from './appUrl'
 import { loadEngine, pianoFolder } from './audio'
 import { createAudioController } from './audioController'
+import { startAudio } from './startAudio'
 import { registerAudioIpc, registerSettingsIpc, registerSongsIpc, sendMidiEvents } from './ipc'
 import { runImportInWorker } from './import/runInWorker'
 import { loadSettings } from './settingsStore'
@@ -34,6 +35,8 @@ const e2eImportFile =
   !app.isPackaged && process.env['PIANO_LEARNER_E2E'] === '1' ? process.env['PIANO_LEARNER_E2E_IMPORT'] : undefined
 
 let mainWindow: BrowserWindow | null = null
+// Stops the look at the sound output's health (set when the app is ready).
+let stopWatchingHealth: (() => void) | undefined
 
 // Loading can fail (no engine file). The controller then reports it and the app still opens.
 const audio = createAudioController(loadEngine())
@@ -178,13 +181,12 @@ if (!app.requestSingleInstanceLock()) {
         importFile: (path) => runImportInWorker(path, { workerFile: join(__dirname, 'importWorker.js') })
       })
       createWindow()
-      // Open the sound output after the window exists, so it never delays the window.
-      // The result (or the reason it failed) is kept for the Sound screen. The saved volume
-      // and piano speaker choice are applied with it.
-      void audio.applySettings(settings)
-      // Load the piano sound on a background thread. It does not wait for the output:
-      // until it is ready (and if it fails) a simple tone plays, and the Sound screen says so.
-      void audio.loadPiano(pianoFolder())
+      // Load the piano sound, then open the sound output (after the window exists, so it never
+      // delays the window). The output opens with the piano already there, so the first sound is
+      // the piano and not the simple stand-in tone. If the load fails the output still opens and
+      // the Sound screen says why. The saved volume and piano speaker choice are applied with it.
+      void startAudio(audio, currentSettings, pianoFolder())
+      stopWatchingHealth = audio.watchHealth()
       // Start the piano watcher after the window exists. Key events go to the screen as they come.
       audio.startMidi(sendMidiEvents(() => mainWindow))
     })
@@ -195,6 +197,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('before-quit', () => {
+  stopWatchingHealth?.()
   audio.stopSong()
   audio.stopMidi()
   audio.stop()
