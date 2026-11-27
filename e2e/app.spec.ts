@@ -136,9 +136,10 @@ test('the Sound screen opens from the library, says sound state, and goes back',
     ).toBeVisible()
 
     // This container has no MIDI ports, so the piano shows as not found.
+    await expect(window.getByText('No piano found.', { exact: true })).toBeVisible({ timeout: 10_000 })
     await expect(
-      window.getByText('No piano found. Check that the piano is on and the USB cable is plugged in.')
-    ).toBeVisible({ timeout: 10_000 })
+      window.getByText('Check that the piano is on and the USB cable is plugged in.', { exact: true })
+    ).toBeVisible()
     await expect(window.getByRole('button', { name: 'Reconnect piano' })).toBeVisible()
 
     const play = window.getByRole('button', { name: 'Play test sound' })
@@ -360,6 +361,10 @@ test('the Delay test opens from Sound, says there is no piano, and saves a repor
     await expect(window.getByRole('button', { name: 'Reconnect piano' })).toBeVisible()
     await expect(window.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
     await expect(window.getByRole('progressbar')).toHaveAttribute('aria-valuemax', '20')
+    // No key has been timed yet, so Start over and Save report are off and say why.
+    await expect(window.getByRole('button', { name: 'Start over' })).toHaveAttribute('aria-disabled', 'true')
+    await expect(window.getByRole('button', { name: 'Save report' })).toHaveAttribute('aria-disabled', 'true')
+    await expect(window.getByText('Play a key first.', { exact: true })).toBeVisible()
 
     const saved = await window.evaluate(async () => {
       const latency = (

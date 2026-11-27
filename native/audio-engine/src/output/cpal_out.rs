@@ -81,9 +81,9 @@ fn friendly(e: cpal::Error) -> String {
         ErrorKind::DeviceNotAvailable => {
             "The sound device is not available. It may have been unplugged.".to_string()
         }
-        ErrorKind::PermissionDenied => "Windows did not allow Piano Learner to use the sound device.".to_string(),
+        ErrorKind::PermissionDenied => "Windows did not allow PianoLearner to use the sound device.".to_string(),
         ErrorKind::UnsupportedConfig => {
-            "The sound device does not support the sound format Piano Learner needs.".to_string()
+            "The sound device does not support the sound format PianoLearner needs.".to_string()
         }
         ErrorKind::HostUnavailable => "No sound output was found.".to_string(),
         _ => "The sound device could not be opened.".to_string(),
@@ -152,7 +152,7 @@ fn build_for_format(
         }
         _ => Err(cpal::Error::with_message(
             ErrorKind::UnsupportedOperation,
-            "The sound device needs a sample format Piano Learner cannot play yet.",
+            "The sound device needs a sound format PianoLearner cannot play yet.",
         )),
     }
 }

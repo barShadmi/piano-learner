@@ -104,11 +104,11 @@ pub fn snap_buffer(requested: u32, min: u32, max: u32, step: u32) -> u32 {
     }
 }
 
-/// Output latency to report: the buffer itself plus what the driver says it
-/// adds between the callback and the sound leaving (0 = not measured).
-/// Callback-to-sound delay. When the driver gave a measured delay (cpal's
-/// `playback - callback`), that already holds the queued buffer and hardware
-/// delay, so it is used on its own. Otherwise the buffer length is the estimate.
+/// Output latency in milliseconds: the time from the callback to the sound
+/// leaving the device. A measured figure (cpal's `playback - callback`, given
+/// as `measured_us`) already holds the queued buffer and the hardware delay,
+/// so it is used on its own. With no measured figure (0), the buffer length is
+/// the estimate.
 pub fn latency_ms(buffer_frames: u32, sample_rate: u32, measured_us: u32) -> f64 {
     if measured_us > 0 {
         return f64::from(measured_us) / 1000.0;
@@ -137,12 +137,12 @@ pub fn f32_to_i24_in_i32(x: f32) -> i32 {
 pub fn friendly_hresult(code: u32) -> String {
     match code {
         0x8889_000A => "The sound device is busy. Another app may be using it in exclusive mode.".into(),
-        0x8889_0008 => "The sound device does not support the sound format Piano Learner needs.".into(),
+        0x8889_0008 => "The sound device does not support the sound format PianoLearner needs.".into(),
         0x8889_000E => "Exclusive mode is turned off for this sound device in Windows settings.".into(),
         0x8889_0004 => "The sound device was unplugged or changed.".into(),
         0x8889_0020 | 0x8889_0019 => "The sound device does not allow that buffer size.".into(),
         0x8889_0001 => "The sound system is not ready.".into(),
-        other => format!("The sound device could not be opened (error 0x{other:08X})."),
+        _ => "The sound device could not be opened.".into(),
     }
 }
 
@@ -310,7 +310,7 @@ pub fn open(cfg: &StartConfig, stats: &Arc<EngineStats>) -> Result<Opened, Strin
         "wasapi-exclusive" | "wasapi-shared" => {
             Err("WASAPI sound is only available on Windows.".to_string())
         }
-        other => Err(format!("Unknown sound backend: {other}.")),
+        other => Err(format!("Unknown sound mode: {other}.")),
     }
 }
 
@@ -324,7 +324,7 @@ fn open_cpal(
 ) -> Result<Opened, String> {
     #[cfg(not(all(windows, feature = "asio")))]
     if asio {
-        return Err("ASIO is not available in this version of Piano Learner.".to_string());
+        return Err("ASIO is not available in this version of PianoLearner.".to_string());
     }
     let attempt = |prefer_default: bool| {
         let (tx, rx) = rings(COMMAND_CAPACITY, MIDI_CAPACITY);
@@ -895,7 +895,17 @@ mod tests {
     fn busy_device_error_is_plain_english() {
         let msg = friendly_hresult(0x8889_000A);
         assert_eq!(msg, "The sound device is busy. Another app may be using it in exclusive mode.");
-        assert!(friendly_hresult(0x1234_5678).contains("0x12345678"));
+        // No raw hex code in the words Bar reads.
+        assert!(!friendly_hresult(0x1234_5678).contains("0x"));
+        assert_eq!(friendly_hresult(0x1234_5678), "The sound device could not be opened.");
+    }
+
+    #[test]
+    fn sound_format_error_names_pianolearner_and_says_sound_format() {
+        assert_eq!(
+            friendly_hresult(0x8889_0008),
+            "The sound device does not support the sound format PianoLearner needs."
+        );
     }
 
     /// A fake output: logs when it opens and when its thread ends.
@@ -1062,7 +1072,7 @@ mod tests {
         let cfg = StartConfig { backend: Some("cpal".into()), device_id: Some("nonsense".into()), buffer_frames: None };
         assert_eq!(open(&cfg, &stats).err().unwrap(), "That sound output was not found.");
         let cfg = StartConfig { backend: Some("tin-can".into()), ..StartConfig::default() };
-        assert_eq!(open(&cfg, &stats).err().unwrap(), "Unknown sound backend: tin-can.");
+        assert_eq!(open(&cfg, &stats).err().unwrap(), "Unknown sound mode: tin-can.");
     }
 
     #[test]

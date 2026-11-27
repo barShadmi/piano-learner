@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AudioState, Backend, OutputDevice } from '../../../shared/audio'
 import type { SettingsSetReply, SoundSettings as Settings } from '../../../shared/settings'
 import styles from './SoundSettings.module.css'
-import { bufferLabel, modeChoices, modeLabel, outputChoices, outputFamily } from './soundText'
+import { BUFFER_HINT, bufferLabel, modeChoices, modeLabel, outputChoices, outputFamily } from './soundText'
 
 const bufferChoices = [64, 128, 256, 512] as const
 
@@ -204,6 +204,7 @@ export default function SoundSettings({ settingsNote, onState }: Props) {
         <select
           id="sound-buffer"
           className={styles.select}
+          aria-describedby="sound-buffer-hint"
           value={settings.bufferFrames}
           onChange={(event) => change({ bufferFrames: Number(event.target.value) as Settings['bufferFrames'] })}
         >
@@ -213,6 +214,9 @@ export default function SoundSettings({ settingsNote, onState }: Props) {
             </option>
           ))}
         </select>
+        <p className={styles.note} id="sound-buffer-hint">
+          {BUFFER_HINT}
+        </p>
       </div>
 
       <div className={styles.rangeRow}>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   backendWords,
+  BUFFER_HINT,
   bufferLabel,
   fallbackLine,
   lastKeyLine,
@@ -12,6 +13,7 @@ import {
   noteName,
   outputChoices,
   outputLabel,
+  pianoHelp,
   pianoLine,
   pianoProblem,
   pianoSoundLine,
@@ -93,10 +95,16 @@ describe('pianoLine', () => {
     ).toBe('Piano connected: Digital Piano')
   })
 
-  it('asks Bar to check the piano when none is found', () => {
-    expect(pianoLine({ ok: true, status: piano })).toBe(
-      'No piano found. Check that the piano is on and the USB cable is plugged in.'
+  it('says no piano is found, in a short headline', () => {
+    expect(pianoLine({ ok: true, status: piano })).toBe('No piano found.')
+  })
+
+  it('gives the check-the-piano help apart from the headline, only when none is found', () => {
+    expect(pianoHelp({ ok: true, status: piano })).toBe(
+      'Check that the piano is on and the USB cable is plugged in.'
     )
+    expect(pianoHelp({ ok: true, status: { ...piano, connected: true, portName: 'Digital Piano' } })).toBeUndefined()
+    expect(pianoHelp(undefined)).toBeUndefined()
   })
 
   it('says it is still looking before the first answer, and that it cannot check', () => {
@@ -211,6 +219,12 @@ describe('bufferLabel', () => {
     expect(bufferLabel(128)).toBe('128 samples, about 2.7 ms')
     expect(bufferLabel(256)).toBe('256 samples, about 5.3 ms')
     expect(bufferLabel(512)).toBe('512 samples, about 10.7 ms')
+  })
+})
+
+describe('BUFFER_HINT', () => {
+  it('explains the Buffer in plain words, with what to do if there are crackles', () => {
+    expect(BUFFER_HINT).toBe('Smaller is faster. If you hear crackles, pick a bigger one.')
   })
 })
 

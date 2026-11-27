@@ -31,31 +31,59 @@ export function verdict(summary: LatencySummary): LatencyVerdict {
 
 export type VerdictWords = { glyph: string; text: string; tips: string[] }
 
-const tryThese = ['Choose exclusive mode or ASIO in Sound settings', 'Use a smaller buffer']
+// The same names as the Sound screen (its Mode and Buffer fields).
+const tryThese = [
+  'On the Sound screen, set Mode to Fastest (exclusive) or ASIO driver.',
+  'Pick a smaller Buffer on the Sound screen.'
+]
 
 // A symbol and words for each verdict, so colour is never the only signal.
+// The words name what the verdict judges: the slowest of most keys (95 in 100).
 export function verdictWords(level: LatencyVerdict): VerdictWords {
   switch (level) {
     case 'good':
-      return { glyph: '✓', text: 'Great. Under 10 ms, you will not feel any delay.', tips: [] }
+      return { glyph: '✓', text: 'Almost every key sounds in under 10 ms. Good.', tips: [] }
     case 'close':
       return {
         glyph: '▲',
-        text: 'Close to the limit. Between 10 and 15 ms, you may feel a little delay.',
+        text: 'Most keys are fast, but some take over 10 ms.',
         tips: tryThese
       }
     case 'slow':
-      return { glyph: '✗', text: 'Too slow. Over 15 ms, you will feel a delay.', tips: tryThese }
+      return { glyph: '✗', text: 'Some keys take over 15 ms. Too slow.', tips: tryThese }
   }
 }
 
-// The big line: the typical time from key to sound.
+// The big line: the typical key, from key to sound.
 export function resultLine(medianMs: number): string {
-  return `About ${medianMs.toFixed(1)} ms from key to sound`
+  return `Typical key: about ${medianMs.toFixed(1)} ms.`
 }
 
 // Shown instead of the key count when the piano is there but no sound output is running.
-export const SOUND_OFF_LINE = 'Sound is not on. Go back to Sound and press Try again.'
+export const SOUND_OFF_LINE = 'Sound is off. Go back to Sound and press Start sound or Try again.'
+
+// Start over and Save report do nothing until one key is timed. This is the hint shown then.
+export const PLAY_A_KEY_FIRST = 'Play a key first.'
+
+// True once at least one key has been timed.
+export function hasTimedKey(summary: LatencySummary | undefined): boolean {
+  return summary !== undefined && summary.count > 0
+}
+
+// The words a screen reader hears about the count. Only every 5 keys and at the end,
+// so the count is not read out after each key. Empty when nothing should be read.
+export function progressAnnouncement(count: number): string {
+  if (count === KEYS_NEEDED) return `All ${KEYS_NEEDED} keys timed.`
+  if (count > 0 && count % 5 === 0) return `${count} of ${KEYS_NEEDED} keys timed.`
+  return ''
+}
+
+// The line about where the sound card figure came from. WASAPI reports it from the driver;
+// the other modes measure it.
+export function soundCardLine(backend: string): string {
+  const source = backend.startsWith('wasapi') ? 'reported by the sound driver' : 'measured'
+  return `The sound card figure was ${source} when sound started.`
+}
 
 // True when no sound output is running, so no key can be timed yet.
 export function soundIsOff(summary: LatencySummary): boolean {
@@ -90,10 +118,10 @@ export function waitMs(summary: LatencySummary): number {
 // The timing rows. Only meaningful once keys have been timed.
 export function timingRows(summary: LatencySummary): Row[] {
   return [
-    { label: 'Typical (median)', value: ms(summary.medianMs) },
-    { label: 'Slowest of most (95%)', value: ms(summary.p95Ms) },
+    { label: 'Typical key', value: ms(summary.medianMs) },
+    { label: 'Almost every key (95 in 100)', value: ms(summary.p95Ms) },
     { label: 'Slowest', value: ms(summary.maxMs) },
-    { label: 'Of which waiting for the sound card', value: ms(waitMs(summary)) },
+    { label: 'Waiting for the next sound slot (typical key)', value: ms(waitMs(summary)) },
     { label: 'Sound card and driver', value: ms(summary.outputMs) },
     { label: 'USB from the piano', value: `${ms(USB_MS)} (estimated)` }
   ]
@@ -102,10 +130,10 @@ export function timingRows(summary: LatencySummary): Row[] {
 // How sound is set up. Shown always.
 export function setupRows(summary: LatencySummary): Row[] {
   return [
-    { label: 'Output mode', value: outputWords(summary.backend) },
+    { label: 'Mode', value: outputWords(summary.backend) },
     { label: 'Buffer', value: `${summary.bufferFrames} samples` },
     { label: 'Sample rate', value: `${summary.sampleRate} Hz` },
-    { label: 'Sound gaps (underruns)', value: String(summary.underruns) }
+    { label: 'Sound gaps', value: String(summary.underruns) }
   ]
 }
 
@@ -123,7 +151,7 @@ export function reportText(summary: LatencySummary, now: Date): string {
   if (summary.count > 0) {
     lines.push('')
     for (const row of timingRows(summary)) lines.push(`${row.label}: ${row.value}`)
-    lines.push('The sound card figure was measured when sound started.')
+    lines.push(soundCardLine(summary.backend))
   }
   lines.push('')
   for (const row of setupRows(summary)) lines.push(`${row.label}: ${row.value}`)

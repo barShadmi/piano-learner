@@ -57,7 +57,13 @@ export function pianoLine(reply: MidiStatusReply | undefined): string {
   if (!reply) return 'Looking for the piano…'
   if (!reply.ok) return 'The piano could not be checked.'
   if (reply.status.connected) return `Piano connected: ${reply.status.portName ?? 'piano'}`
-  return 'No piano found. Check that the piano is on and the USB cable is plugged in.'
+  return 'No piano found.'
+}
+
+// The help under the headline when no piano is found. Nothing when there is nothing to fix.
+export function pianoHelp(reply: MidiStatusReply | undefined): string | undefined {
+  if (!reply || !reply.ok || reply.status.connected) return undefined
+  return 'Check that the piano is on and the USB cable is plugged in.'
 }
 
 // The reason the piano could not be opened, if there is one, for the screen to show.
@@ -135,6 +141,9 @@ export function modeChoices(outputs: readonly OutputDevice[], current: Backend):
   const listed = new Set<string>(outputs.map((output) => output.backend))
   return modeOrder.filter((backend) => listed.has(backend) || backend === current)
 }
+
+// The hint under the Buffer field, in plain words.
+export const BUFFER_HINT = 'Smaller is faster. If you hear crackles, pick a bigger one.'
 
 // The buffer size with its time, at 48000 Hz (samples divided by 48 gives milliseconds).
 export function bufferLabel(frames: number): string {

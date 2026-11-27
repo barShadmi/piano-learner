@@ -2,9 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import type { MidiStatusReply } from '../../../shared/audio'
 import {
   KEYS_NEEDED,
+  PLAY_A_KEY_FIRST,
   SOUND_OFF_LINE,
+  hasTimedKey,
+  progressAnnouncement,
   resultLine,
   setupRows,
+  soundCardLine,
   soundIsOff,
   timingRows,
   verdict,
@@ -69,7 +73,11 @@ export default function Latency() {
     return () => clearInterval(timer)
   }, [askPiano])
 
-  const testAgain = (): void => {
+  // Start over and Save report do nothing until a key is timed (they are also aria-disabled then).
+  const keyTimed = hasTimedKey(summary)
+
+  const startOver = (): void => {
+    if (!keyTimed) return
     setSaved(false)
     setMessage('')
     window.pianoLearner.latency.clear().then(
@@ -86,11 +94,12 @@ export default function Latency() {
   }
 
   const saveReport = (): void => {
+    if (!keyTimed) return
     window.pianoLearner.latency.save().then(
       (reply) => {
         if (reply.ok) {
           setSaved(true)
-          setMessage('Saved latency-report.txt and latency-report.json.')
+          setMessage('Report saved.')
         } else {
           setMessage(reply.error)
         }
@@ -149,6 +158,10 @@ export default function Latency() {
             <p className={styles.statusLine} id="progress-label">
               {`${shown} of ${KEYS_NEEDED} keys`}
             </p>
+            {/* Only every 5 keys and at the end are read out, not every key. */}
+            <p className={styles.visuallyHidden} aria-live="polite">
+              {progressAnnouncement(shown)}
+            </p>
             <div
               className={styles.track}
               role="progressbar"
@@ -157,7 +170,7 @@ export default function Latency() {
               aria-valuemax={KEYS_NEEDED}
               aria-valuenow={shown}
             >
-              <div className={styles.fill} style={{ width: `${(shown / KEYS_NEEDED) * 100}%` }} />
+              <div className={styles.fill} style={{ transform: `scaleX(${shown / KEYS_NEEDED})` }} />
             </div>
           </>
         )}
@@ -166,8 +179,10 @@ export default function Latency() {
 
         {summary && words ? (
           <>
-            <p className={styles.big}>{resultLine(summary.medianMs)}</p>
-            <p className={`${styles.verdict} ${styles[verdict(summary)]}`}>
+            <p className={styles.big} role="status">
+              {resultLine(summary.medianMs)}
+            </p>
+            <p className={`${styles.verdict} ${styles[verdict(summary)]}`} role="status">
               <span aria-hidden="true" className={styles.glyph}>
                 {words.glyph}
               </span>
@@ -197,18 +212,35 @@ export default function Latency() {
                 ))}
               </tbody>
             </table>
-            <p className={styles.note}>The sound card figure was measured when sound started.</p>
+            <p className={styles.note}>{soundCardLine(summary.backend)}</p>
           </>
         ) : null}
 
         <div className={styles.actions}>
-          <button type="button" className="button" onClick={testAgain}>
-            Test again
+          <button
+            type="button"
+            className="button"
+            aria-disabled={keyTimed ? undefined : 'true'}
+            aria-describedby={keyTimed ? undefined : 'play-first-hint'}
+            onClick={startOver}
+          >
+            Start over
           </button>
-          <button type="button" className="button" onClick={saved ? showFile : saveReport}>
-            {saved ? 'Saved. Show file' : 'Save report'}
+          <button
+            type="button"
+            className="button"
+            aria-disabled={keyTimed ? undefined : 'true'}
+            aria-describedby={keyTimed ? undefined : 'play-first-hint'}
+            onClick={saved ? showFile : saveReport}
+          >
+            {saved ? 'Show report' : 'Save report'}
           </button>
         </div>
+        {keyTimed ? null : (
+          <p className={styles.note} id="play-first-hint">
+            {PLAY_A_KEY_FIRST}
+          </p>
+        )}
         <p className={styles.note} role="status">
           {message}
         </p>

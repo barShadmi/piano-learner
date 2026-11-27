@@ -487,7 +487,7 @@ describe('createAudioController delay test', () => {
     const report = c.latencyReport(now)
     expect(report).toEqual({ ok: true, text: expect.any(String), json: expect.any(String) })
     if (!report.ok) throw new Error('expected a report')
-    expect(report.text).toContain('About 4.2 ms from key to sound')
+    expect(report.text).toContain('Typical key: about 4.2 ms.')
     expect(JSON.parse(report.json)).toMatchObject({ savedAt: '2026-11-27T13:50:00.000Z', verdict: 'good' })
   })
 

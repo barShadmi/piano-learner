@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  PLAY_A_KEY_FIRST,
   SOUND_OFF_LINE,
+  hasTimedKey,
+  progressAnnouncement,
+  soundCardLine,
   soundIsOff,
   outputWords,
   reportJson,
@@ -47,19 +51,27 @@ describe('verdict', () => {
 })
 
 describe('verdictWords', () => {
-  it('says great, with a tick and no tips, when good', () => {
+  it('says almost every key is under 10 ms, with a tick and no tips, when good', () => {
     expect(verdictWords('good')).toEqual({
       glyph: '✓',
-      text: 'Great. Under 10 ms, you will not feel any delay.',
+      text: 'Almost every key sounds in under 10 ms. Good.',
       tips: []
     })
   })
 
-  it('gives the two things to try when close or slow', () => {
+  it('says most keys are fast but some take over 10 ms, when close', () => {
+    expect(verdictWords('close').text).toBe('Most keys are fast, but some take over 10 ms.')
+  })
+
+  it('says some keys take over 15 ms, when slow', () => {
+    expect(verdictWords('slow').text).toBe('Some keys take over 15 ms. Too slow.')
+  })
+
+  it('gives the two things to try when close or slow, using the Sound screen names', () => {
     for (const level of ['close', 'slow'] as const) {
       expect(verdictWords(level).tips).toEqual([
-        'Choose exclusive mode or ASIO in Sound settings',
-        'Use a smaller buffer'
+        'On the Sound screen, set Mode to Fastest (exclusive) or ASIO driver.',
+        'Pick a smaller Buffer on the Sound screen.'
       ])
     }
   })
@@ -71,18 +83,18 @@ describe('verdictWords', () => {
 })
 
 describe('resultLine', () => {
-  it('rounds the typical time to one decimal', () => {
-    expect(resultLine(4.23)).toBe('About 4.2 ms from key to sound')
+  it('says the big number is the typical key, rounded to one decimal', () => {
+    expect(resultLine(4.23)).toBe('Typical key: about 4.2 ms.')
   })
 })
 
 describe('timingRows', () => {
   it('gives the plain-word rows, with the wait worked out from the median', () => {
     expect(timingRows(base)).toEqual([
-      { label: 'Typical (median)', value: '4.2 ms' },
-      { label: 'Slowest of most (95%)', value: '5.1 ms' },
+      { label: 'Typical key', value: '4.2 ms' },
+      { label: 'Almost every key (95 in 100)', value: '5.1 ms' },
       { label: 'Slowest', value: '6.0 ms' },
-      { label: 'Of which waiting for the sound card', value: '0.5 ms' },
+      { label: 'Waiting for the next sound slot (typical key)', value: '0.5 ms' },
       { label: 'Sound card and driver', value: '2.7 ms' },
       { label: 'USB from the piano', value: '1.0 ms (estimated)' }
     ])
@@ -92,10 +104,10 @@ describe('timingRows', () => {
 describe('setupRows', () => {
   it('says how sound is set up in plain words', () => {
     expect(setupRows(base)).toEqual([
-      { label: 'Output mode', value: 'exclusive mode' },
+      { label: 'Mode', value: 'exclusive mode' },
       { label: 'Buffer', value: '128 samples' },
       { label: 'Sample rate', value: '48000 Hz' },
-      { label: 'Sound gaps (underruns)', value: '0' }
+      { label: 'Sound gaps', value: '0' }
     ])
   })
 })
@@ -112,14 +124,22 @@ describe('outputWords', () => {
 describe('reportText', () => {
   it('gives the result, the verdict and the rows in plain words', () => {
     const text = reportText(base, now)
-    expect(text).toContain('About 4.2 ms from key to sound')
-    expect(text).toContain('Great. Under 10 ms, you will not feel any delay.')
-    expect(text).toContain('Typical (median): 4.2 ms')
-    expect(text).toContain('Output mode: exclusive mode')
+    expect(text).toContain('Typical key: about 4.2 ms.')
+    expect(text).toContain('Almost every key sounds in under 10 ms. Good.')
+    expect(text).toContain('Typical key: 4.2 ms')
+    expect(text).toContain('Mode: exclusive mode')
   })
 
-  it('says when the sound card figure was measured', () => {
-    expect(reportText(base, now)).toContain('measured when sound started')
+  it('says the sound driver reported the sound card figure for WASAPI modes', () => {
+    expect(reportText(base, now)).toContain(
+      'The sound card figure was reported by the sound driver when sound started.'
+    )
+  })
+
+  it('says the sound card figure was measured for the other modes', () => {
+    const text = reportText({ ...base, backend: 'cpal' }, now)
+    expect(text).toContain('The sound card figure was measured when sound started.')
+    expect(text).not.toContain('reported by the sound driver')
   })
 
   it('says the time it was saved', () => {
@@ -129,13 +149,13 @@ describe('reportText', () => {
   it('says no keys were timed yet, with no result, when there are none', () => {
     const text = reportText({ ...base, count: 0, backend: '' }, now)
     expect(text).toContain('No keys have been timed yet.')
-    expect(text).not.toContain('About')
+    expect(text).not.toContain('Typical key')
   })
 
   it('says how many keys so far, with no verdict, when fewer than 20', () => {
     const text = reportText({ ...base, count: 7 }, now)
     expect(text).toContain('Only 7 of 20 keys timed so far.')
-    expect(text).not.toContain('Great.')
+    expect(text).not.toContain('Almost every key sounds')
   })
 })
 
@@ -166,6 +186,45 @@ describe('reportJson', () => {
   })
 })
 
+describe('hasTimedKey', () => {
+  it('is false before any answer and before any key is timed, true once one is', () => {
+    expect(hasTimedKey(undefined)).toBe(false)
+    expect(hasTimedKey({ ...base, count: 0 })).toBe(false)
+    expect(hasTimedKey({ ...base, count: 1 })).toBe(true)
+  })
+
+  it('gives the hint shown while Start over and Save report are off', () => {
+    expect(PLAY_A_KEY_FIRST).toBe('Play a key first.')
+  })
+})
+
+describe('progressAnnouncement', () => {
+  it('says nothing for most keys, so the screen reader is not spammed', () => {
+    expect(progressAnnouncement(0)).toBe('')
+    expect(progressAnnouncement(3)).toBe('')
+    expect(progressAnnouncement(6)).toBe('')
+  })
+
+  it('says the count every 5 keys, and when all 20 are timed', () => {
+    expect(progressAnnouncement(5)).toBe('5 of 20 keys timed.')
+    expect(progressAnnouncement(15)).toBe('15 of 20 keys timed.')
+    expect(progressAnnouncement(20)).toBe('All 20 keys timed.')
+  })
+})
+
+describe('soundCardLine', () => {
+  it('says the driver reported the figure for WASAPI modes, and that it was measured otherwise', () => {
+    expect(soundCardLine('wasapi-exclusive')).toBe(
+      'The sound card figure was reported by the sound driver when sound started.'
+    )
+    expect(soundCardLine('wasapi-shared')).toBe(
+      'The sound card figure was reported by the sound driver when sound started.'
+    )
+    expect(soundCardLine('cpal')).toBe('The sound card figure was measured when sound started.')
+    expect(soundCardLine('asio')).toBe('The sound card figure was measured when sound started.')
+  })
+})
+
 describe('soundIsOff', () => {
   it('is true when no sound output is running (no backend)', () => {
     expect(soundIsOff({ ...base, backend: '' })).toBe(true)
@@ -176,6 +235,6 @@ describe('soundIsOff', () => {
   })
 
   it('gives the plain words to show instead', () => {
-    expect(SOUND_OFF_LINE).toBe('Sound is not on. Go back to Sound and press Try again.')
+    expect(SOUND_OFF_LINE).toBe('Sound is off. Go back to Sound and press Start sound or Try again.')
   })
 })
