@@ -11,7 +11,7 @@ export type ImportResult = { ok: true; song: Song } | { ok: false; error: string
 /** Files bigger than this are refused. */
 export const MAX_IMPORT_BYTES = 20 * 1024 * 1024
 
-const TOO_BIG = 'This file is too big.'
+const TOO_BIG = 'This file is too big. Pick a file under 20 MB.'
 
 export async function importSongFile(path: string): Promise<ImportResult> {
   const ext = extname(path).toLowerCase()
@@ -37,6 +37,6 @@ export async function importSongFile(path: string): Promise<ImportResult> {
   if (!result.ok) return result
 
   const checked = validateSong(result.song)
-  if (!checked.ok) return { ok: false, error: 'This file could not be turned into a song.' }
+  if (!checked.ok) return { ok: false, error: 'This file could not be turned into a song. Try another copy of the song.' }
   return { ok: true, song: checked.song }
 }

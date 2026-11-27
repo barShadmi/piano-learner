@@ -40,7 +40,7 @@ describe('importSongFile', () => {
   })
 
   it('reports an empty song', async () => {
-    expect(await importSongFile(file('g.mid', emptyMidi()))).toEqual({ ok: false, error: 'This file has no notes.' })
+    expect(await importSongFile(file('g.mid', emptyMidi()))).toEqual({ ok: false, error: 'This file has no notes. Pick another file.' })
   })
 
   it('reports a file that is not what its name says', async () => {
@@ -52,7 +52,7 @@ describe('importSongFile', () => {
 
   it('refuses a file over 20 MB', async () => {
     const big = file('i.mid', new Uint8Array(20 * 1024 * 1024 + 1))
-    expect(await importSongFile(big)).toEqual({ ok: false, error: 'This file is too big.' })
+    expect(await importSongFile(big)).toEqual({ ok: false, error: 'This file is too big. Pick a file under 20 MB.' })
   })
 
   it('says so when the file is missing, without a stack trace', async () => {

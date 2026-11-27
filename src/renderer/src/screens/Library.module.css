@@ -62,14 +62,26 @@
 }
 
 .rowTitle {
+  min-width: 0;
   font-size: var(--text-lg);
   color: var(--text);
   overflow-wrap: anywhere;
 }
 
+/* A long title wraps; the Play button keeps its size. */
+.playButton {
+  flex-shrink: 0;
+}
+
 .rowMeta {
   font-size: var(--text-md);
   color: var(--text-muted);
+}
+
+.separator {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: var(--space-4) 0 0;
 }
 
 .empty {

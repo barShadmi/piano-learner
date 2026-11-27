@@ -14,6 +14,20 @@ export function screenFor(hash: string): Screen {
   return 'not-found'
 }
 
+// The name shown in the window title for each screen.
+const SCREEN_NAMES: Record<Screen, string> = {
+  library: 'Your songs',
+  sound: 'Sound',
+  latency: 'Delay test',
+  play: 'Play',
+  'not-found': 'Screen not found'
+}
+
+// The text for document.title, e.g. "Sound · PianoLearner".
+export function documentTitle(screen: Screen): string {
+  return `${SCREEN_NAMES[screen]} · PianoLearner`
+}
+
 // The song id in '#/play/<song id>', or undefined for '#/play' and anything else.
 export function songIdFor(hash: string): string | undefined {
   const prefix = '#/play/'

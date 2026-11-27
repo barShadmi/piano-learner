@@ -187,7 +187,7 @@ describe('parseMusicXml: details', () => {
   it('says so when there are no notes', () => {
     expect(parseMusicXml(scoreXml(m('<note><rest/><duration>4</duration></note>')), 'a.xml')).toEqual({
       ok: false,
-      error: 'This file has no notes.'
+      error: 'This file has no notes. Pick another file.'
     })
   })
 

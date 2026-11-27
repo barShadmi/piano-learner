@@ -16,7 +16,7 @@ const MAX_MEASURES = 20000
 const MAX_UNZIPPED_BYTES = 20 * 1024 * 1024
 
 const NOT_MUSICXML = 'This file could not be read as MusicXML.'
-const NO_NOTES = 'This file has no notes.'
+const NO_NOTES = 'This file has no notes. Pick another file.'
 
 type XNode = Record<string, unknown>
 

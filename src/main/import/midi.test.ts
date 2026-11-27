@@ -79,7 +79,7 @@ describe('parseMidi', () => {
 
   it('says so when there are no notes', () => {
     const r = parseMidi(emptyMidi(), 'a.mid')
-    expect(r).toEqual({ ok: false, error: 'This file has no notes.' })
+    expect(r).toEqual({ ok: false, error: 'This file has no notes. Pick another file.' })
   })
 
   it('gives a plain error for a file that is not MIDI', () => {
@@ -92,6 +92,6 @@ describe('parseMidi', () => {
     const drums = midi.addTrack()
     drums.channel = 9
     drums.addNote({ midi: 36, ticks: 0, durationTicks: 480 })
-    expect(parseMidi(midi.toArray(), 'd.mid')).toEqual({ ok: false, error: 'This file has no notes.' })
+    expect(parseMidi(midi.toArray(), 'd.mid')).toEqual({ ok: false, error: 'This file has no notes. Pick another file.' })
   })
 })

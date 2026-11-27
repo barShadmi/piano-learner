@@ -5,7 +5,7 @@ import type { ImportResult } from './index'
 
 export const IMPORT_TIMEOUT_MS = 60_000
 
-const TOO_LONG: ImportResult = { ok: false, error: 'Importing took too long.' }
+const TOO_LONG: ImportResult = { ok: false, error: 'Importing took too long. Try a smaller file.' }
 const CRASHED: ImportResult = { ok: false, error: 'This file could not be imported.' }
 
 export interface WorkerOptions {

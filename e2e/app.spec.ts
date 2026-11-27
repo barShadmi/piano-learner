@@ -26,7 +26,7 @@ test('the app opens to the Your songs screen', async () => {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
 
-    expect(await window.title()).toBe('PianoLearner')
+    expect(await window.title()).toBe('Your songs · PianoLearner')
     await expect(window.getByRole('heading', { name: 'Your songs' })).toBeVisible()
   } finally {
     await app.close()
@@ -120,6 +120,9 @@ test('the Sound screen opens from the library, says sound state, and goes back',
     await window.keyboard.press('Enter')
 
     await expect(window.getByRole('heading', { name: 'Sound', level: 1 })).toBeVisible()
+    // A route change sets the window title and moves focus to the screen's h1.
+    await expect(window.getByRole('heading', { name: 'Sound', level: 1 })).toBeFocused()
+    expect(await window.title()).toBe('Sound · PianoLearner')
     // This container has no sound card, so sound ends up "could not start" (not a crash).
     // On a machine with sound it ends up "on". Either way it leaves "Starting".
     await expect(window.getByText(/^Sound (could not start|is on)\./)).toBeVisible({
@@ -158,7 +161,7 @@ test('the Play screen opens from the library, shows 88 keys, and goes back by ke
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
 
-    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.getByRole('heading', { name: 'Play', level: 1 })).toBeVisible()
 
     await expect(window.getByRole('img', { name: 'Piano keyboard' })).toBeVisible()
@@ -183,10 +186,10 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     // Open, leave and open again: the view starts cleanly a second time.
-    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
     await window.getByRole('link', { name: 'Back to your songs' }).click()
-    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
     await expect(window.getByText('The falling notes could not start on this PC.')).toHaveCount(0)
 
@@ -263,7 +266,7 @@ test('Listen asks for the song to be heard; with no sound it says why and the fa
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
-    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
 
     await expect(window.getByRole('button', { name: 'Listen', exact: true })).toBeVisible()
@@ -304,7 +307,7 @@ test('Watch during Listen silences it: a waiting start is cancelled and no sound
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
-    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
 
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
@@ -327,7 +330,7 @@ test('Watch clears the sound message that Listen showed', async () => {
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
-    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
 
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
@@ -487,7 +490,8 @@ test('Import file adds a MIDI song to the library, and it opens on Play', async 
     await expect(row).toBeVisible()
     await expect(window.getByRole('link', { name: 'Play E2E Tune', exact: true })).toBeVisible()
     await expect(window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true })).toBeVisible()
-    await expect(window.getByRole('listitem').first()).toContainText('Canon in D (opening) · sample')
+    await expect(window.getByRole('listitem').first()).toContainText('Canon in D (opening)')
+    await expect(window.getByRole('listitem').first()).toContainText('Sample')
 
     // Screenshots of the library with the sample and one imported song, in both themes.
     const shots = process.env['LIBRARY_SHOTS']
