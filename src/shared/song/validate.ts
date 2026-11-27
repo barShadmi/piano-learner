@@ -67,19 +67,22 @@ export function validateSong(value: unknown): ValidationResult {
     fail('source.fileName', 'must not be empty')
   }
 
-  // Measures. The last measure's end sets the length of the song.
+  // Measures. Each measure must start where the previous one ends. The last
+  // measure's end sets the length of the song.
   let lastEnd: number | undefined
   const measures = value.measures
   if (!Array.isArray(measures) || measures.length === 0) {
     fail('measures', 'must have at least one measure')
   } else {
-    let previousStart: number | undefined
+    // End of the previous measure, when it is known (valid start and time signature).
+    let previousEnd: number | undefined
     for (let i = 0; i < measures.length; i++) {
       const m: unknown = measures[i]
       const path = `measures[${i}]`
       if (!isObj(m)) {
         fail(path, 'must be an object')
-        previousStart = undefined
+        previousEnd = undefined
+        lastEnd = undefined
         continue
       }
       if (m.index !== i) fail(`${path}.index`, `must be ${i}`)
@@ -87,13 +90,11 @@ export function validateSong(value: unknown): ValidationResult {
       const start = m.start
       if (!isNum(start)) {
         fail(`${path}.start`, 'must be a number')
-        previousStart = undefined
       } else if (i === 0 && start !== 0) {
         fail(`${path}.start`, 'must be 0')
-      } else if (previousStart !== undefined && start <= previousStart) {
-        fail(`${path}.start`, 'must be after the previous measure')
+      } else if (previousEnd !== undefined && start !== previousEnd) {
+        fail(`${path}.start`, `must start where measure ${i - 1} ends (beat ${previousEnd})`)
       }
-      previousStart = isNum(start) ? start : undefined
 
       const ts = m.timeSignature
       let beats: number | undefined
@@ -105,9 +106,11 @@ export function validateSong(value: unknown): ValidationResult {
       if (beats === undefined) fail(`${path}.timeSignature.beats`, 'must be a whole number above 0')
       if (beatUnit === undefined) fail(`${path}.timeSignature.beatUnit`, 'must be 1, 2, 4, 8 or 16')
 
-      if (i === measures.length - 1 && isNum(start) && beats !== undefined && beatUnit !== undefined) {
-        lastEnd = start + (beats * 4) / beatUnit
-      }
+      lastEnd =
+        isNum(start) && beats !== undefined && beatUnit !== undefined
+          ? start + (beats * 4) / beatUnit
+          : undefined
+      previousEnd = lastEnd
     }
   }
 

@@ -316,3 +316,71 @@ describe('validateSong step 2 checks', () => {
     expect(hasErrorAt(errorsOf(song), 'measures[0].timeSignature.beatUnit')).toBe(true)
   })
 })
+
+describe('validateSong measure continuity', () => {
+  it('rejects a measure that starts after the previous measure ends (a gap)', () => {
+    const song = freshSong()
+    // Measure 0 is 4 beats long, so measure 1 must start at beat 4. Beat 5 leaves a gap.
+    measureAt(song, 1).start = 5
+    const errors = errorsOf(song)
+    expect(errors).toContain('measures[1].start: must start where measure 0 ends (beat 4)')
+  })
+
+  it('rejects a measure that starts before the previous measure ends (an overlap)', () => {
+    const song = freshSong()
+    // Measure 1 starts at beat 4 and is 4 beats long, so measure 2 must start at beat 8. Beat 6 overlaps.
+    measureAt(song, 2).start = 6
+    const errors = errorsOf(song)
+    expect(errors).toContain('measures[2].start: must start where measure 1 ends (beat 8)')
+  })
+})
+
+describe('validateSong accepts edge values', () => {
+  type Setter = (song: Obj, value: number) => void
+  const cases: [string, Setter, number][] = [
+    ['a pitch of 21', (s, v) => { noteAt(s, 0).pitch = v }, 21],
+    ['a pitch of 108', (s, v) => { noteAt(s, 0).pitch = v }, 108],
+    ['a bpm of 20', (s, v) => { tempoAt(s, 0).bpm = v }, 20],
+    ['a bpm of 300', (s, v) => { tempoAt(s, 0).bpm = v }, 300],
+    ['a finger of 1', (s, v) => { noteAt(s, 0).finger = v }, 1],
+    ['a finger of 5', (s, v) => { noteAt(s, 0).finger = v }, 5],
+    ['a velocity of 1', (s, v) => { noteAt(s, 0).velocity = v }, 1],
+    ['a velocity of 127', (s, v) => { noteAt(s, 0).velocity = v }, 127],
+    ['a confidence of 0', (s, v) => { noteAt(s, 0).confidence = v }, 0],
+    ['a confidence of 1', (s, v) => { noteAt(s, 0).confidence = v }, 1],
+    ['a keyFifths of -7', (s, v) => { s.keyFifths = v }, -7],
+    ['a keyFifths of 7', (s, v) => { s.keyFifths = v }, 7],
+  ]
+
+  it.each(cases)('gives no errors for %s', (_label, setValue, value) => {
+    const song = freshSong()
+    setValue(song, value)
+    expect(errorsOf(song)).toEqual([])
+  })
+})
+
+describe('validateSong new rejections', () => {
+  it('rejects an empty song id', () => {
+    const song = freshSong()
+    song.id = ''
+    expect(hasErrorAt(errorsOf(song), 'id')).toBe(true)
+  })
+
+  it('rejects a time signature with 0 beats', () => {
+    const song = freshSong()
+    ;(measureAt(song, 0).timeSignature as Obj).beats = 0
+    expect(hasErrorAt(errorsOf(song), 'measures[0].timeSignature.beats')).toBe(true)
+  })
+
+  it('rejects notes that are not an array', () => {
+    const song = freshSong()
+    song.notes = 'not a list'
+    expect(hasErrorAt(errorsOf(song), 'notes')).toBe(true)
+  })
+
+  it('rejects a measure that is not an object', () => {
+    const song = freshSong()
+    ;(song.measures as unknown[])[1] = 'bar two'
+    expect(hasErrorAt(errorsOf(song), 'measures[1]')).toBe(true)
+  })
+})
