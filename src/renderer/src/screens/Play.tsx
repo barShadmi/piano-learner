@@ -317,7 +317,7 @@ function PlaySong({ song }: { song: Song }) {
           {keys.pedal ? 'Pedal: down' : 'Pedal: up'}
         </p>
         <div className={styles.stage}>
-          <p className={styles.legend}>Blue = right hand (R) · Orange = left hand (L)</p>
+          <p className={styles.legend}>Blue = right hand (R, or a stripe on the right edge) · Orange = left hand (L, or a stripe on the left edge)</p>
           <FallingNotes timed={timed} clock={clock} onSounding={setSongLit} endS={endS} onEnd={onEnd} />
           <Keyboard lit={lit} />
         </div>
