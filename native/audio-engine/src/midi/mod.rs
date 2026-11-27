@@ -4,17 +4,19 @@
 //! and a forwarder thread (that is only for the screens, and may lag).
 //! Nothing here runs on the audio thread.
 
+pub mod local;
 pub mod watch;
 
 use crate::core::midi_msg::{self, MidiEvent};
 use crate::core::Command;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::sync::OnceLock;
 use std::thread::{JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
-pub use watch::{list_inputs, MidirBackend, OpenPort, PortBackend};
+pub use local::LocalState;
+pub use watch::{list_inputs, MidirBackend, OpenPort, OutPort, PortBackend};
 
 /// Room for pending key events between the MIDI thread and the audio thread.
 pub const MIDI_CAPACITY: usize = 256;
@@ -37,11 +39,13 @@ fn relock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Which port to use: one that looks like the P-121 (or a "Digital Piano" or
 /// anything Yamaha), else the first one. `None` when there are no ports.
 pub fn pick_port(names: &[String]) -> Option<usize> {
-    let likely = |n: &String| {
-        let n = n.to_lowercase();
-        n.contains("p-121") || n.contains("p121") || n.contains("digital piano") || n.contains("yamaha")
-    };
-    names.iter().position(likely).or(if names.is_empty() { None } else { Some(0) })
+    names.iter().position(|n| looks_like_piano(n)).or(if names.is_empty() { None } else { Some(0) })
+}
+
+/// Whether a port name looks like the P-121, a digital piano or a Yamaha.
+pub fn looks_like_piano(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n.contains("p-121") || n.contains("p121") || n.contains("digital piano") || n.contains("yamaha")
 }
 
 /// Where the MIDI thread puts commands for the audio thread. The producer is
@@ -134,6 +138,12 @@ pub struct MidiHub {
     dropped_screen: AtomicU64,
     connected: AtomicBool,
     reconnect: AtomicBool,
+    /// Whether the piano's own speakers should be switched off (Local Control off).
+    local_off: AtomicBool,
+    /// The setting changed and the watcher has not applied it yet.
+    local_changed: AtomicBool,
+    /// A `LocalState` as a number.
+    local_state: AtomicU8,
     port_name: Mutex<Option<String>>,
     error: Mutex<Option<String>>,
     handler: Mutex<Option<EventHandler>>,
@@ -148,6 +158,9 @@ impl MidiHub {
             dropped_screen: AtomicU64::new(0),
             connected: AtomicBool::new(false),
             reconnect: AtomicBool::new(false),
+            local_off: AtomicBool::new(true),
+            local_changed: AtomicBool::new(false),
+            local_state: AtomicU8::new(LocalState::Unknown.to_u8()),
             port_name: Mutex::new(None),
             error: Mutex::new(None),
             handler: Mutex::new(None),
@@ -175,6 +188,22 @@ impl MidiHub {
 
     pub(crate) fn reconnect_requested(&self) -> bool {
         self.reconnect.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn local_off(&self) -> bool {
+        self.local_off.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn take_local_changed(&self) -> bool {
+        self.local_changed.swap(false, Ordering::AcqRel)
+    }
+
+    pub(crate) fn local_changed_requested(&self) -> bool {
+        self.local_changed.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_local_state(&self, state: LocalState) {
+        self.local_state.store(state.to_u8(), Ordering::Release);
     }
 
     pub(crate) fn set_error(&self, error: Option<String>) {
@@ -240,6 +269,8 @@ pub struct MidiStatus {
     pub events: u64,
     pub dropped_sound: u64,
     pub dropped_screen: u64,
+    /// Whether the piano's own speakers are off (we switched Local Control off).
+    pub local_control: LocalState,
 }
 
 struct Threads {
@@ -267,6 +298,18 @@ impl MidiService {
             events: self.hub.events(),
             dropped_sound: self.hub.dropped_sound(),
             dropped_screen: self.hub.dropped_screen(),
+            local_control: LocalState::from_u8(self.hub.local_state.load(Ordering::Acquire)),
+        }
+    }
+
+    /// Keep the piano's own speakers off (true, the default) or let them play
+    /// too (false). Applies at once when the piano is connected, and is used
+    /// at every later connect. Fine to call before `start`.
+    pub fn set_local_control_off(&self, off: bool) {
+        self.hub.local_off.store(off, Ordering::Release);
+        self.hub.local_changed.store(true, Ordering::Release);
+        if let Some(t) = relock(&self.threads).as_ref() {
+            t.watcher.thread().unpark();
         }
     }
 
@@ -320,6 +363,7 @@ impl MidiService {
             let _ = t.forwarder.join();
         }
         self.hub.set_connected(None);
+        self.hub.set_local_state(LocalState::Unknown);
         self.hub.set_error(None);
         self.set_handler(None);
     }

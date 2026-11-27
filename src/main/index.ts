@@ -48,6 +48,11 @@ function createWindow(): void {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
   })
+  // Windows shutdown or log off skips before-quit, so give the piano its speakers back here too.
+  win.on('session-end', () => {
+    audio.stopMidi()
+    audio.stop()
+  })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     console.error('The screen process stopped:', details.reason)

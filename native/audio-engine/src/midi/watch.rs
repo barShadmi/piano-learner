@@ -1,7 +1,8 @@
 //! The watcher thread (looks at the port list, connects, reconnects) and the
 //! forwarder thread (hands the JS copy of each event to JavaScript).
 
-use super::{pick_port, InputHandler, JsEvent, MidiHub, relock};
+use super::local::{all_notes_off, local_control};
+use super::{looks_like_piano, pick_port, InputHandler, JsEvent, LocalState, MidiHub, relock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -12,10 +13,20 @@ pub trait OpenPort {
     fn close(self: Box<Self>);
 }
 
+/// An open MIDI output port. Lives on the watcher thread only (never on the
+/// audio thread).
+pub trait OutPort {
+    /// Write one message. Returns when the bytes are written.
+    fn send(&mut self, bytes: &[u8]) -> Result<(), String>;
+    fn close(self: Box<Self>);
+}
+
 /// The MIDI system: its port list, and how to open a port.
 pub trait PortBackend {
     fn names(&mut self) -> Result<Vec<String>, String>;
     fn open(&mut self, name: &str, handler: InputHandler) -> Result<Box<dyn OpenPort>, String>;
+    /// Open the output port that belongs to the input called `name`.
+    fn open_output(&mut self, name: &str) -> Result<Box<dyn OutPort>, String>;
 }
 
 const CLIENT_NAME: &str = "Piano Learner";
@@ -41,6 +52,18 @@ impl OpenPort for MidirPort {
     }
 }
 
+struct MidirOut(midir::MidiOutputConnection);
+
+impl OutPort for MidirOut {
+    fn send(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.0.send(bytes).map_err(|e| e.to_string())
+    }
+
+    fn close(self: Box<Self>) {
+        self.0.close();
+    }
+}
+
 impl PortBackend for MidirBackend {
     fn names(&mut self) -> Result<Vec<String>, String> {
         Ok(list_inputs())
@@ -59,18 +82,53 @@ impl PortBackend for MidirBackend {
             .map_err(|_| "The piano is busy. Another app may be using it.".to_string())?;
         Ok(Box::new(MidirPort(conn)))
     }
+
+    fn open_output(&mut self, name: &str) -> Result<Box<dyn OutPort>, String> {
+        let output = midir::MidiOutput::new(CLIENT_NAME).map_err(|_| NO_MIDI.to_string())?;
+        let ports = output.ports();
+        let names: Vec<String> = ports.iter().map(|p| output.port_name(p).unwrap_or_default()).collect();
+        // The P-121 shows an input and an output with the same name. If the names
+        // differ (Windows may number duplicates), take an output that looks like
+        // the piano. Never the first port: that is often a software synth.
+        let i = names
+            .iter()
+            .position(|n| n == name)
+            .or_else(|| names.iter().position(|n| looks_like_piano(n)))
+            .ok_or("The piano has no output port.")?;
+        let conn = output
+            .connect(&ports[i], "Piano Learner output")
+            .map_err(|_| "The piano's output port is busy.".to_string())?;
+        Ok(Box::new(MidirOut(conn)))
+    }
 }
 
 /// Sleep until `deadline`, waking early when `stop` is set or a reconnect is
-/// asked for (both unpark the watcher).
+/// asked for or the Local Control setting changes (all unpark the watcher).
 fn nap(deadline: Instant, stop: &AtomicBool, hub: &MidiHub) {
-    while !stop.load(Ordering::Acquire) && !hub.reconnect_requested() {
+    while !stop.load(Ordering::Acquire) && !hub.reconnect_requested() && !hub.local_changed_requested() {
         let now = Instant::now();
         if now >= deadline {
             return;
         }
         thread::park_timeout(deadline - now);
     }
+}
+
+/// Send Local Control (as the setting says) to the piano, plus All Notes Off
+/// when `with_notes_off` (right after a connect). Records what the piano now
+/// does; `Unknown` when there is no output or a write failed.
+fn apply_local(hub: &MidiHub, out: &mut Option<Box<dyn OutPort>>, with_notes_off: bool) {
+    let Some(port) = out.as_mut() else {
+        hub.set_local_state(LocalState::Unknown);
+        return;
+    };
+    let off = hub.local_off();
+    let sent = port.send(&local_control(!off)).is_ok() && (!with_notes_off || port.send(&all_notes_off()).is_ok());
+    hub.set_local_state(match (sent, off) {
+        (false, _) => LocalState::Unknown,
+        (true, true) => LocalState::Off,
+        (true, false) => LocalState::On,
+    });
 }
 
 pub(super) fn spawn_watcher<B: PortBackend + Send + 'static>(
@@ -85,6 +143,7 @@ pub(super) fn spawn_watcher<B: PortBackend + Send + 'static>(
         .spawn(move || {
             // The open port stays on this thread (it may not be `Send`).
             let mut current: Option<(String, Box<dyn OpenPort>)> = None;
+            let mut out: Option<Box<dyn OutPort>> = None;
             while !stop.load(Ordering::Acquire) {
                 let names = backend.names().unwrap_or_default();
                 let asked = hub.take_reconnect();
@@ -92,6 +151,10 @@ pub(super) fn spawn_watcher<B: PortBackend + Send + 'static>(
                     if let Some((_, port)) = current.take() {
                         port.close();
                     }
+                    if let Some(o) = out.take() {
+                        o.close();
+                    }
+                    hub.set_local_state(LocalState::Unknown);
                     hub.set_connected(None);
                 }
                 if current.is_none() && !stop.load(Ordering::Acquire) {
@@ -101,16 +164,31 @@ pub(super) fn spawn_watcher<B: PortBackend + Send + 'static>(
                                 hub.set_error(None);
                                 hub.set_connected(Some(names[i].clone()));
                                 current = Some((names[i].clone(), port));
+                                // No output port is fine: the keys still work.
+                                out = backend.open_output(&names[i]).ok();
+                                hub.take_local_changed();
+                                apply_local(&hub, &mut out, true);
                             }
                             Err(e) => hub.set_error(Some(e)),
                         }
                     }
                 }
+                if hub.take_local_changed() && current.is_some() {
+                    apply_local(&hub, &mut out, false);
+                }
                 nap(Instant::now() + interval, &stop, &hub);
+            }
+            // Give the piano its own sound back before letting go.
+            if let Some(o) = out.as_mut() {
+                let _ = o.send(&local_control(true));
             }
             if let Some((_, port)) = current.take() {
                 port.close();
             }
+            if let Some(o) = out.take() {
+                o.close();
+            }
+            hub.set_local_state(LocalState::Unknown);
             hub.set_connected(None);
         })
         .expect("the computer refused a new thread")
@@ -166,6 +244,23 @@ mod tests {
         opens: Arc<Mutex<u32>>,
         opened_names: Arc<Mutex<Vec<String>>>,
         fail_open: Arc<Mutex<Option<String>>>,
+        /// Everything written to the output port, in order. An empty entry marks the port closing.
+        sent: Arc<Mutex<Vec<Vec<u8>>>>,
+        /// Set to pretend the piano has no output port.
+        no_output: Arc<Mutex<bool>>,
+        output_names: Arc<Mutex<Vec<String>>>,
+    }
+
+    struct FakeOut(Arc<Mutex<Vec<Vec<u8>>>>);
+
+    impl OutPort for FakeOut {
+        fn send(&mut self, bytes: &[u8]) -> Result<(), String> {
+            self.0.lock().unwrap().push(bytes.to_vec());
+            Ok(())
+        }
+        fn close(self: Box<Self>) {
+            self.0.lock().unwrap().push(Vec::new());
+        }
     }
 
     struct FakeConn(Arc<Mutex<Option<InputHandler>>>);
@@ -188,6 +283,13 @@ mod tests {
             *self.opens.lock().unwrap() += 1;
             *self.live.lock().unwrap() = Some(handler);
             Ok(Box::new(FakeConn(Arc::clone(&self.live))))
+        }
+        fn open_output(&mut self, name: &str) -> Result<Box<dyn OutPort>, String> {
+            if *self.no_output.lock().unwrap() {
+                return Err("no output".into());
+            }
+            self.output_names.lock().unwrap().push(name.to_string());
+            Ok(Box::new(FakeOut(Arc::clone(&self.sent))))
         }
     }
 
@@ -404,5 +506,120 @@ mod tests {
             assert!(t.elapsed() < Duration::from_millis(40), "took {:?}", t.elapsed());
         }
         svc.stop();
+    }
+
+    const OFF: [u8; 3] = [0xB0, 0x7A, 0x00];
+    const ON: [u8; 3] = [0xB0, 0x7A, 0x7F];
+    const NOTES_OFF: [u8; 3] = [0xB0, 0x7B, 0x00];
+
+    fn sent(fake: &Fake) -> Vec<Vec<u8>> {
+        fake.sent.lock().unwrap().clone()
+    }
+
+    fn piano() -> Fake {
+        let fake = Fake::default();
+        fake.ports.lock().unwrap().push("P-121".into());
+        fake
+    }
+
+    #[test]
+    fn connect_sends_local_off_then_all_notes_off_to_the_output_of_the_same_name() {
+        let fake = piano();
+        let svc = service();
+        svc.start_with(fake.clone(), FAST);
+        wait_for("local off", || svc.status().local_control == LocalState::Off);
+        assert_eq!(sent(&fake), vec![OFF.to_vec(), NOTES_OFF.to_vec()]);
+        assert_eq!(*fake.output_names.lock().unwrap(), vec!["P-121".to_string()]);
+        svc.stop();
+    }
+
+    #[test]
+    fn reconnect_sends_local_off_and_all_notes_off_again() {
+        let fake = piano();
+        let svc = service();
+        svc.start_with(fake.clone(), Duration::from_secs(30));
+        wait_for("first", || sent(&fake).len() == 2);
+        svc.reconnect();
+        wait_for("second", || sent(&fake).len() >= 5);
+        svc.stop();
+        let log = sent(&fake);
+        assert_eq!(log[..5], [OFF.to_vec(), NOTES_OFF.to_vec(), Vec::new(), OFF.to_vec(), NOTES_OFF.to_vec()]);
+    }
+
+    #[test]
+    fn stop_sends_local_on_before_closing_and_is_quick() {
+        let fake = piano();
+        let svc = service();
+        svc.start_with(fake.clone(), Duration::from_secs(30));
+        wait_for("local off", || svc.status().local_control == LocalState::Off);
+        let t = Instant::now();
+        svc.stop();
+        assert!(t.elapsed() < Duration::from_millis(100), "stop took {:?}", t.elapsed());
+        assert_eq!(sent(&fake), vec![OFF.to_vec(), NOTES_OFF.to_vec(), ON.to_vec(), Vec::new()]);
+        assert_eq!(svc.status().local_control, LocalState::Unknown);
+    }
+
+    #[test]
+    fn with_no_output_port_local_control_is_unknown_and_the_keys_still_work() {
+        let fake = piano();
+        *fake.no_output.lock().unwrap() = true;
+        let svc = service();
+        let seen: Arc<Mutex<u32>> = Arc::default();
+        let count = Arc::clone(&seen);
+        svc.set_handler(Some(Arc::new(move |b: Vec<JsEvent>| *count.lock().unwrap() += b.len() as u32)));
+        svc.start_with(fake.clone(), FAST);
+        wait_for("connect", || svc.status().connected);
+        assert_eq!(svc.status().local_control, LocalState::Unknown);
+        fake.press(&[0x90, 60, 64]);
+        wait_for("event", || *seen.lock().unwrap() == 1);
+        svc.stop();
+        assert!(sent(&fake).is_empty());
+    }
+
+    #[test]
+    fn turning_the_setting_off_while_connected_sends_local_on_at_once() {
+        let fake = piano();
+        let svc = service();
+        svc.start_with(fake.clone(), Duration::from_secs(30));
+        wait_for("local off", || svc.status().local_control == LocalState::Off);
+        svc.set_local_control_off(false);
+        wait_for("local on", || svc.status().local_control == LocalState::On);
+        assert_eq!(sent(&fake)[2], ON.to_vec());
+        svc.set_local_control_off(true);
+        wait_for("local off again", || svc.status().local_control == LocalState::Off);
+        assert_eq!(sent(&fake)[3], OFF.to_vec());
+        svc.stop();
+    }
+
+    #[test]
+    fn with_the_setting_off_a_connect_leaves_the_piano_speakers_on() {
+        let fake = piano();
+        let svc = service();
+        svc.set_local_control_off(false);
+        svc.start_with(fake.clone(), FAST);
+        wait_for("local on", || svc.status().local_control == LocalState::On);
+        assert_eq!(sent(&fake)[0], ON.to_vec());
+        assert!(!sent(&fake).contains(&OFF.to_vec()));
+        svc.stop();
+    }
+
+    #[test]
+    fn unplugging_drops_the_output_and_goes_back_to_unknown() {
+        let fake = piano();
+        let svc = service();
+        svc.start_with(fake.clone(), FAST);
+        wait_for("local off", || svc.status().local_control == LocalState::Off);
+        fake.ports.lock().unwrap().clear();
+        wait_for("unknown", || svc.status().local_control == LocalState::Unknown);
+        assert_eq!(sent(&fake).last(), Some(&Vec::new()), "the output was closed");
+        svc.stop();
+    }
+
+    #[test]
+    fn the_setting_is_kept_when_set_before_the_service_starts() {
+        let svc = service();
+        svc.set_local_control_off(false);
+        svc.stop();
+        assert_eq!(svc.status().local_control, LocalState::Unknown);
     }
 }

@@ -74,6 +74,9 @@ export type MidiStatus = {
   events: number
   droppedSound: number
   droppedScreen: number
+  // Whether the piano's own speakers are off: 'off' (we switched Local Control off),
+  // 'on', or 'unknown' (not connected, or no output port).
+  localControl: 'off' | 'on' | 'unknown'
 }
 
 export type MidiStatusReply = { ok: true; status: MidiStatus } | { ok: false; error: string }

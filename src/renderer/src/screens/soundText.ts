@@ -87,3 +87,21 @@ export function pianoSoundLine(piano: PianoSound): string {
 
 // The thanks the sample licence asks for.
 export const PIANO_SOUND_CREDIT = 'Piano sound: Salamander Grand Piano by Alexander Holm (CC BY 3.0).'
+
+// The line under the piano status, shown only while the piano is connected.
+// 'on' shows nothing: Bar chose to let the piano's speakers play too.
+export function localControlLine(reply: MidiStatusReply | undefined): string | undefined {
+  if (!reply || !reply.ok || !reply.status.connected) return undefined
+  switch (reply.status.localControl) {
+    case 'off':
+      return "The piano's own speakers are off, so you hear the PC."
+    case 'unknown':
+      return "The piano's own speakers may still be on."
+    default:
+      return undefined
+  }
+}
+
+// The tip for when the sound is heard twice (the piano's speakers are still on).
+export const LOCAL_CONTROL_TIP =
+  'If you hear the sound twice, hold METRONOME and RHYTHM on the piano and press the C5 key.'

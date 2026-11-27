@@ -30,7 +30,8 @@ export type MidiEngine = {
   startMidi(): void
   stopMidi(): void
   reconnectMidi(): void
-  midiStatus(): MidiStatus
+  // Older addons do not report localControl; the controller then says 'unknown'.
+  midiStatus(): Omit<MidiStatus, 'localControl'> & { localControl?: MidiStatus['localControl'] }
   onMidiEvent(callback: (events: MidiEvent[]) => void): void
 }
 
@@ -174,7 +175,8 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     midiStatus(): MidiStatusReply {
       if (!engine || typeof engine.midiStatus !== 'function') return { ok: false, error: midiMissing }
       try {
-        return { ok: true, status: engine.midiStatus() }
+        const status = engine.midiStatus()
+        return { ok: true, status: { ...status, localControl: status.localControl ?? 'unknown' } }
       } catch (error) {
         return { ok: false, error: reason(error, 'The piano status could not be read.') }
       }

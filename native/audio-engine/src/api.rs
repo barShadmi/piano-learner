@@ -235,6 +235,10 @@ pub struct JsMidiStatus {
     pub dropped_sound: f64,
     /// Keys that could not be sent to the screens in time.
     pub dropped_screen: f64,
+    /// Whether the piano's own speakers are off: "off" (we switched Local
+    /// Control off), "on", or "unknown" (not connected, or no output port).
+    #[napi(ts_type = "'off' | 'on' | 'unknown'")]
+    pub local_control: String,
 }
 
 impl From<JsEvent> for JsMidiEvent {
@@ -266,6 +270,7 @@ pub fn midi_status() -> JsMidiStatus {
         events: s.events as f64,
         dropped_sound: s.dropped_sound as f64,
         dropped_screen: s.dropped_screen as f64,
+        local_control: s.local_control.as_str().to_string(),
     }
 }
 
@@ -298,8 +303,16 @@ pub fn reconnect_midi() {
     MIDI.reconnect();
 }
 
-/// Stop looking, close the piano's port and let go of the callback.
+/// Stop looking, give the piano its own sound back (Local Control on), close
+/// its ports and let go of the callback.
 #[napi]
 pub fn stop_midi() {
     MIDI.stop();
+}
+
+/// Keep the piano's own speakers off (true, the default) or let them play too
+/// (false). Applies at once if the piano is connected, and at every connect.
+#[napi]
+pub fn set_local_control_off(off: bool) {
+    MIDI.set_local_control_off(off);
 }

@@ -57,6 +57,11 @@ export interface MidiStatus {
   droppedSound: number
   /** Keys that could not be sent to the screens in time. */
   droppedScreen: number
+  /**
+   * Whether the piano's own speakers are off: "off" (we switched Local
+   * Control off), "on", or "unknown" (not connected, or no output port).
+   */
+  localControl: 'off' | 'on' | 'unknown'
 }
 
 /**
@@ -98,6 +103,12 @@ export declare function playTestTone(frequencyHz?: number | undefined | null, se
  */
 export declare function reconnectMidi(): void
 
+/**
+ * Keep the piano's own speakers off (true, the default) or let them play too
+ * (false). Applies at once if the piano is connected, and at every connect.
+ */
+export declare function setLocalControlOff(off: boolean): void
+
 /** Master volume from 0 to 1. */
 export declare function setVolume(volume: number): void
 
@@ -135,5 +146,8 @@ export declare function status(): EngineStatus
 /** Close the sound output. Fine to call when nothing is open. */
 export declare function stop(): void
 
-/** Stop looking, close the piano's port and let go of the callback. */
+/**
+ * Stop looking, give the piano its own sound back (Local Control on), close
+ * its ports and let go of the callback.
+ */
 export declare function stopMidi(): void
