@@ -183,7 +183,8 @@ if (!app.requestSingleInstanceLock()) {
       // delays the window). The output opens with the piano already there, so the first sound is
       // the piano and not the simple stand-in tone. If the load fails the output still opens and
       // the Sound screen says why. The saved volume and piano speaker choice are applied with it.
-      void startAudio(audio, settings, pianoFolder())
+      void startAudio(audio, currentSettings, pianoFolder())
+      audio.watchHealth()
       // Start the piano watcher after the window exists. Key events go to the screen as they come.
       audio.startMidi(sendMidiEvents(() => mainWindow))
     })

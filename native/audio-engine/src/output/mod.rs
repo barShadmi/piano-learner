@@ -75,6 +75,16 @@ pub fn align_period(frames: u32, sample_rate: u32, min_period_100ns: i64) -> i64
     (whole_frames * 10_000_000 + sr / 2) / sr
 }
 
+/// How many device-event timeouts in a row mean the device has stalled.
+pub const STALL_TIMEOUTS: u32 = 2;
+
+/// True when the device has missed `consecutive_timeouts` events in a row. In
+/// exclusive event mode a stalled device repeats its last buffer (a loud
+/// buzz), so the output must stop and be restarted instead of waiting.
+pub fn device_stalled(consecutive_timeouts: u32) -> bool {
+    consecutive_timeouts >= STALL_TIMEOUTS
+}
+
 /// f32 in -1..1 to a 16-bit sample: clamped, rounded to nearest, NaN is silence.
 pub fn f32_to_i16(x: f32) -> i16 {
     if x.is_nan() {
@@ -795,6 +805,14 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_missed_device_event_is_a_glitch_two_in_a_row_is_a_stalled_device() {
+        assert!(!device_stalled(0));
+        assert!(!device_stalled(1));
+        assert!(device_stalled(STALL_TIMEOUTS));
+        assert!(device_stalled(STALL_TIMEOUTS + 5));
+    }
 
     #[test]
     fn align_period_converts_frames_to_100ns() {

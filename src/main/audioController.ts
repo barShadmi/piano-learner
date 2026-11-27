@@ -97,7 +97,12 @@ function reason(error: unknown, fallback: string): string {
 
 // Keeps the last start result or error so the Sound screen can ask for it at any time.
 // It never throws to its callers: every answer is data. It does no sound work itself.
-export function createAudioController(source: { engine?: FullEngine; loadError?: string }) {
+export function createAudioController(
+  source: { engine?: FullEngine; loadError?: string },
+  options: { restartBackoffMs?: number[]; healthCheckMs?: number } = {}
+) {
+  const restartBackoffMs = options.restartBackoffMs ?? [500, 1000, 2000]
+  const healthCheckMs = options.healthCheckMs ?? 1000
   const engine = source.engine
   const missing = source.loadError ?? 'The sound engine is not available.'
   const midiMissing = 'The piano part of the sound engine is not available.'
@@ -119,8 +124,13 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
   // Set when the saved output was not found and the default output is used. Cleared by the next settings change.
   let settingsNote: string | undefined
 
+  // True while the launch waits for the piano sound before it opens the output. The screen
+  // then says sound is starting, not off.
+  let launching = false
+
   const view = (): AudioState => {
-    const base = settingsNote ? { ...current, settingsNote } : current
+    const shown = launching && current.phase === 'off' ? { phase: 'starting' as const } : current
+    const base = settingsNote ? { ...shown, settingsNote } : shown
     return pianoError ? { ...base, piano, pianoError } : { ...base, piano }
   }
 
@@ -246,6 +256,45 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     return applying
   }
 
+  // Restarts that happened since the output was last seen healthy for a while.
+  let restarts = 0
+  let healthyChecks = 0
+  let checking = false
+  const phaseNow = (): AudioState['phase'] => current.phase
+
+  // When the engine says the device stalled or failed while sound is on, restarts the output the
+  // same way a Mode switch does: up to 3 tries with a growing wait, then the failure is shown
+  // (with Try again). Never throws.
+  const checkHealth = async (): Promise<void> => {
+    if (checking || !engine || current.phase !== 'on' || pendingStart || applying || !runningConfig) return
+    let failed: boolean
+    try {
+      failed = engine.status().failed
+    } catch {
+      return
+    }
+    if (!failed) {
+      if (++healthyChecks >= 5) restarts = 0
+      return
+    }
+    healthyChecks = 0
+    checking = true
+    try {
+      const config = runningConfig
+      while (restarts < restartBackoffMs.length) {
+        const wait = restartBackoffMs[restarts] ?? 0
+        restarts++
+        await new Promise<void>((resolve) => setTimeout(resolve, wait))
+        const now = phaseNow()
+        if (now === 'off' || now === 'starting') return // stopped or restarted by someone else meanwhile
+        await start(config)
+        if (phaseNow() === 'on') return
+      }
+    } finally {
+      checking = false
+    }
+  }
+
   const songMissing = 'The song player of the sound engine is not available.'
 
   // Stops the song and releases its notes. Never throws; nothing playing is not an error.
@@ -293,6 +342,19 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     start,
 
     applySettings,
+
+    setLaunching(on: boolean): void {
+      launching = on
+    },
+
+    checkHealth,
+
+    // Looks at the output now and then, and restarts it if the device stalled.
+    // Returns a function that stops the looking.
+    watchHealth(): () => void {
+      const timer = setInterval(() => void checkHealth(), healthCheckMs)
+      return () => clearInterval(timer)
+    },
 
     // Try again: starts sound with these settings even when they match the running sound
     // (a failed start, or a fallback mode). While a pass is running it only asks that pass for a
