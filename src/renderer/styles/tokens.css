@@ -11,9 +11,10 @@
   --text: #1c1b19;
   --text-muted: #5c5a54;
 
-  /* Accent */
-  --accent: #1d4ed8;
-  --on-accent: #ffffff;
+  /* Accent: ink, so blue and orange mean only the hands. It follows the theme because
+     data-theme is set on <html>, the same element as :root. */
+  --accent: var(--text);
+  --on-accent: var(--surface);
 
   /* Hands: blue family (right) and orange family (left) */
   --hand-right: #1d4ed8;
@@ -24,8 +25,8 @@
   /* Feedback */
   --correct: #15803d;
   --correct-soft: #dcf3e3;
-  --wrong: #b91c1c;
-  --wrong-soft: #fbe0e0;
+  --wrong: #9f1239;
+  --wrong-soft: #fbe1e7;
 
   /* Keyboard */
   --key-white: #ffffff;
@@ -75,9 +76,6 @@
   --text: #f0efeb;
   --text-muted: #a9a8b2;
 
-  --accent: #8ab4ff;
-  --on-accent: #0d1530;
-
   --hand-right: #6ea8ff;
   --hand-left: #ff9f5a;
   --hand-right-soft: #1e2a44;
@@ -85,8 +83,8 @@
 
   --correct: #4ade80;
   --correct-soft: #17331f;
-  --wrong: #f87171;
-  --wrong-soft: #3a1c1c;
+  --wrong: #fb7185;
+  --wrong-soft: #3a1c26;
 
   --key-white: #e9e8e4;
   --key-black: #0c0c0f;
@@ -95,7 +93,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --dur-fast: 0ms;
-    --dur: 0ms;
+    --dur-fast: 1ms;
+    --dur: 1ms;
   }
 }
