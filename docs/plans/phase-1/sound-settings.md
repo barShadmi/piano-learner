@@ -22,3 +22,4 @@ Acceptance: npm test, lint, build, e2e pass; screenshots light and dark.
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder (Haiku) | 2 | FAIL (a settings change during a start was lost), then PASS. Also added: a missing saved output falls back to the default with a note; settings:set refuses non-objects. |

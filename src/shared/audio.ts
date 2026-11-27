@@ -51,6 +51,8 @@ export type AudioState = {
   error?: string
   piano: PianoSound
   pianoError?: string
+  // Set when the saved sound output was not found and the default output is used. Plain English.
+  settingsNote?: string
 }
 
 export type ListOutputsReply = { ok: true; outputs: OutputDevice[] } | { ok: false; error: string }
