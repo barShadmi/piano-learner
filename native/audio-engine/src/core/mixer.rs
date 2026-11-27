@@ -138,7 +138,7 @@ impl Mixer {
                 self.notes.iter_mut().for_each(NoteVoice::stop);
                 self.piano.iter_mut().for_each(PianoVoice::stop);
             }
-            Command::NoteOn { note, velocity } => self.note_on(note, velocity),
+            Command::NoteOn { note, velocity, .. } => self.note_on(note, velocity),
             Command::NoteOff { note } => self.note_off(note),
             Command::Sustain(down) => {
                 self.pedal_down = down;
@@ -459,7 +459,7 @@ mod tests {
     // ---- note voices (stand-in piano) ----
 
     fn on(note: u8, velocity: u8) -> Command {
-        Command::NoteOn { note, velocity }
+        Command::NoteOn { note, velocity, midi_us: 0 }
     }
 
     fn off(note: u8) -> Command {

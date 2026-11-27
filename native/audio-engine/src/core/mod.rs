@@ -31,6 +31,35 @@ impl EngineStats {
     }
 }
 
+/// One key press as the audio thread saw it. `midi_us` is when the MIDI
+/// callback got the message, `picked_us` when the audio callback that handled
+/// it started, both on the `clock` clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LatencySample {
+    pub note: u8,
+    pub midi_us: u64,
+    pub picked_us: u64,
+}
+
+/// The notes from the MIDI thread, and where the audio thread reports how long
+/// each one waited. Without a latency ring nothing is timed.
+pub struct MidiInput {
+    pub commands: rtrb::Consumer<Command>,
+    pub latency: Option<rtrb::Producer<LatencySample>>,
+}
+
+impl MidiInput {
+    pub fn new(commands: rtrb::Consumer<Command>, latency: rtrb::Producer<LatencySample>) -> Self {
+        Self { commands, latency: Some(latency) }
+    }
+}
+
+impl From<rtrb::Consumer<Command>> for MidiInput {
+    fn from(commands: rtrb::Consumer<Command>) -> Self {
+        Self { commands, latency: None }
+    }
+}
+
 /// Lock-free command channel (single producer, single consumer).
 pub fn channel(capacity: usize) -> (rtrb::Producer<Command>, rtrb::Consumer<Command>) {
     rtrb::RingBuffer::new(capacity)
@@ -40,7 +69,7 @@ pub fn channel(capacity: usize) -> (rtrb::Producer<Command>, rtrb::Consumer<Comm
 pub struct EngineCore {
     commands: rtrb::Consumer<Command>,
     /// Notes from the MIDI thread, which is the only producer of this ring.
-    midi: rtrb::Consumer<Command>,
+    midi: MidiInput,
     mixer: Mixer,
     /// Piano banks that arrive while the output runs (see `piano::bank_link`).
     bank_link: Option<crate::piano::BankReceiver>,
@@ -53,8 +82,9 @@ impl EngineCore {
         Self::with_midi(commands, midi, mixer)
     }
 
-    pub fn with_midi(commands: rtrb::Consumer<Command>, midi: rtrb::Consumer<Command>, mixer: Mixer) -> Self {
-        Self { commands, midi, mixer, bank_link: None }
+    pub fn with_midi(commands: rtrb::Consumer<Command>, midi: impl Into<MidiInput>, mixer: Mixer) -> Self {
+        clock::init();
+        Self { commands, midi: midi.into(), mixer, bank_link: None }
     }
 
     /// Accept piano banks through `link`. A replaced bank goes back through
@@ -75,13 +105,20 @@ impl EngineCore {
         while let Ok(cmd) = self.commands.pop() {
             self.mixer.handle(cmd);
         }
-        while let Ok(cmd) = self.midi.pop() {
+        // One clock read per call, and only when notes are being timed.
+        let picked_us = if self.midi.latency.is_some() { clock::now_us() } else { 0 };
+        while let Ok(cmd) = self.midi.commands.pop() {
+            if let (Command::NoteOn { note, midi_us, .. }, Some(latency)) = (cmd, self.midi.latency.as_mut()) {
+                // Never waits. A full ring just loses this sample.
+                let _ = latency.push(LatencySample { note, midi_us, picked_us });
+            }
             self.mixer.handle(cmd);
         }
         self.mixer.render(out);
     }
 }
 
+pub mod clock;
 mod command;
 pub mod midi_msg;
 mod mixer;
@@ -108,7 +145,7 @@ mod tests {
         let (_tx, rx) = channel(16);
         let (mut midi_tx, midi_rx) = channel(16);
         let mut core = EngineCore::with_midi(rx, midi_rx, Mixer::new(48_000, 2));
-        midi_tx.push(Command::NoteOn { note: 69, velocity: 100 }).unwrap();
+        midi_tx.push(Command::NoteOn { note: 69, velocity: 100, midi_us: 0 }).unwrap();
         let mut out = [0.0f32; 2 * 480];
         core.process(&mut out);
         assert!(out.iter().any(|s| s.abs() > 0.01), "note should be audible");
@@ -120,7 +157,7 @@ mod tests {
         let (mut midi_tx, midi_rx) = channel(16);
         let mut core = EngineCore::with_midi(rx, midi_rx, Mixer::new(48_000, 1));
         tx.push(Command::SetMasterVolume(0.0)).unwrap();
-        midi_tx.push(Command::NoteOn { note: 60, velocity: 127 }).unwrap();
+        midi_tx.push(Command::NoteOn { note: 60, velocity: 127, midi_us: 0 }).unwrap();
         let mut out = [0.0f32; 4800];
         core.process(&mut out);
         assert!(out[480..].iter().all(|s| *s == 0.0), "master volume from the command ring applies");
@@ -131,7 +168,7 @@ mod tests {
     fn new_keeps_working_without_a_midi_ring() {
         let (mut tx, rx) = channel(16);
         let mut core = EngineCore::new(rx, Mixer::new(48_000, 1));
-        tx.push(Command::NoteOn { note: 69, velocity: 100 }).unwrap();
+        tx.push(Command::NoteOn { note: 69, velocity: 100, midi_us: 0 }).unwrap();
         let mut out = [0.0f32; 480];
         core.process(&mut out);
         assert!(out.iter().any(|s| s.abs() > 0.01));
@@ -191,7 +228,7 @@ mod tests {
         let mut out = [0.0f32; 480];
         core.process(&mut out);
         assert_eq!(Arc::strong_count(&first), 2, "the audio thread now holds it");
-        tx.push(Command::NoteOn { note: 69, velocity: 127 }).unwrap();
+        tx.push(Command::NoteOn { note: 69, velocity: 127, midi_us: 0 }).unwrap();
         core.process(&mut out);
         let p = out.iter().fold(0.0f32, |a, b| a.max(b.abs()));
         assert!((p - 0.4).abs() < 0.02, "piano sample peak (0.8 * master 0.5), not the stand-in: {p}");
@@ -210,5 +247,84 @@ mod tests {
         let mut out = [0.0f32; 64];
         core.process(&mut out);
         assert!(out.iter().all(|s| *s == 0.0));
+    }
+
+    // ---- latency samples ----
+
+    fn latency_core(ring: usize) -> (EngineCore, rtrb::Producer<Command>, rtrb::Consumer<LatencySample>) {
+        let (_tx, rx) = channel(16);
+        let (midi_tx, midi_rx) = channel(64);
+        let (lat_tx, lat_rx) = rtrb::RingBuffer::new(ring);
+        let core = EngineCore::with_midi(rx, MidiInput::new(midi_rx, lat_tx), Mixer::new(48_000, 1));
+        (core, midi_tx, lat_rx)
+    }
+
+    #[test]
+    fn a_stamped_midi_note_makes_exactly_one_sample_picked_no_earlier() {
+        let (mut core, mut midi_tx, mut lat) = latency_core(16);
+        let stamp = clock::now_us();
+        midi_tx.push(Command::NoteOn { note: 64, velocity: 80, midi_us: stamp }).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        let s = lat.pop().expect("one sample");
+        assert_eq!(s.note, 64);
+        assert_eq!(s.midi_us, stamp);
+        assert!(s.picked_us >= stamp, "{} >= {stamp}", s.picked_us);
+        assert!(lat.pop().is_err(), "exactly one");
+        core.process(&mut out);
+        assert!(lat.pop().is_err(), "a note is only timed once");
+    }
+
+    #[test]
+    fn two_notes_in_one_callback_share_one_clock_read() {
+        let (mut core, mut midi_tx, mut lat) = latency_core(16);
+        let stamp = clock::now_us();
+        midi_tx.push(Command::NoteOn { note: 60, velocity: 80, midi_us: stamp }).unwrap();
+        midi_tx.push(Command::NoteOn { note: 67, velocity: 80, midi_us: stamp }).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        let (a, b) = (lat.pop().unwrap(), lat.pop().unwrap());
+        assert_eq!((a.note, b.note), (60, 67));
+        assert_eq!(a.picked_us, b.picked_us);
+    }
+
+    #[test]
+    fn only_notes_from_the_midi_ring_are_timed() {
+        let (mut tx, rx) = channel(16);
+        let (mut midi_tx, midi_rx) = channel(16);
+        let (lat_tx, mut lat) = rtrb::RingBuffer::new(8);
+        let mut core = EngineCore::with_midi(rx, MidiInput::new(midi_rx, lat_tx), Mixer::new(48_000, 1));
+        tx.push(Command::NoteOn { note: 60, velocity: 90, midi_us: 5 }).unwrap();
+        midi_tx.push(Command::NoteOff { note: 60 }).unwrap();
+        midi_tx.push(Command::Sustain(true)).unwrap();
+        midi_tx.push(Command::AllNotesOff).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert!(lat.pop().is_err(), "no sample for a note on the command ring, or for off, pedal and all-off");
+    }
+
+    #[test]
+    fn a_full_latency_ring_drops_samples_and_the_note_still_plays() {
+        let (mut core, mut midi_tx, mut lat) = latency_core(1);
+        for note in [60u8, 62, 64] {
+            midi_tx.push(Command::NoteOn { note, velocity: 100, midi_us: clock::now_us() }).unwrap();
+        }
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert!(out.iter().any(|s| s.abs() > 0.01), "sound is not held back by a full ring");
+        assert_eq!(lat.pop().unwrap().note, 60);
+        assert!(lat.pop().is_err(), "the other two were dropped");
+        assert!(midi_tx.slots() == 64, "the midi ring was emptied");
+    }
+
+    #[test]
+    fn a_core_without_a_latency_ring_still_plays_and_reads_no_stamps() {
+        let (_tx, rx) = channel(16);
+        let (mut midi_tx, midi_rx) = channel(16);
+        let mut core = EngineCore::with_midi(rx, midi_rx, Mixer::new(48_000, 1));
+        midi_tx.push(Command::NoteOn { note: 69, velocity: 100, midi_us: 1 }).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert!(out.iter().any(|s| s.abs() > 0.01));
     }
 }

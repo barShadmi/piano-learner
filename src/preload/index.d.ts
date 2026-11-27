@@ -9,6 +9,7 @@ import type {
   TestToneReply,
   ToneArgs
 } from '../shared/audio'
+import type { LatencyClearReply, LatencyOpenReply, LatencyReply, LatencySaveReply } from '../shared/latency'
 
 export {}
 
@@ -23,6 +24,12 @@ declare global {
         start(config?: StartConfig): Promise<AudioState>
         testTone(args?: ToneArgs): Promise<TestToneReply>
         status(): Promise<StatusReply>
+      }
+      latency: {
+        summary(): Promise<LatencyReply>
+        clear(): Promise<LatencyClearReply>
+        save(): Promise<LatencySaveReply>
+        showFile(): Promise<LatencyOpenReply>
       }
       midi: {
         status(): Promise<MidiStatusReply>

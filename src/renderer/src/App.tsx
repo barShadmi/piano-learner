@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Latency from './screens/Latency'
 import Library from './screens/Library'
 import NotFound from './screens/NotFound'
 import Sound from './screens/Sound'
@@ -16,5 +17,6 @@ export default function App() {
   const screen = screenFor(hash)
   if (screen === 'library') return <Library />
   if (screen === 'sound') return <Sound />
+  if (screen === 'latency') return <Latency />
   return <NotFound />
 }

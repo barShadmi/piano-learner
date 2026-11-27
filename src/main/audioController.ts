@@ -1,3 +1,11 @@
+import {
+  reportJson,
+  reportText,
+  type LatencyClearReply,
+  type LatencyReply,
+  type LatencyReportReply,
+  type LatencySummary
+} from '../shared/latency'
 import type {
   AudioState,
   EngineStatus,
@@ -40,7 +48,24 @@ export type PianoEngine = {
   loadPiano(folder: string): Promise<{ samples: number; seconds: number }>
 }
 
-export type FullEngine = Engine & Partial<MidiEngine> & Partial<PianoEngine>
+// The delay part of the native addon. Also optional: an older addon has none.
+export type LatencyEngine = {
+  latencySummary(): LatencySummary
+  clearLatency(): void
+}
+
+export type FullEngine = Engine & Partial<MidiEngine> & Partial<PianoEngine> & Partial<LatencyEngine>
+
+const delayMissing = 'The delay part of the sound engine is not available.'
+const delayUnreadable = 'The delay numbers could not be read.'
+
+// Checks the numbers from the engine before the screen sees them.
+function isLatencySummary(value: unknown): value is LatencySummary {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  const numbers = ['count', 'medianMs', 'p95Ms', 'maxMs', 'outputMs', 'bufferFrames', 'sampleRate', 'underruns']
+  return typeof v['backend'] === 'string' && numbers.every((key) => typeof v[key] === 'number' && Number.isFinite(v[key]))
+}
 
 function reason(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
@@ -60,6 +85,26 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
   let pianoLoading: Promise<void> | undefined
 
   const view = (): AudioState => (pianoError ? { ...current, piano, pianoError } : { ...current, piano })
+
+  // Forgets the remembered key timings. Never throws.
+  const forgetDelays = (): void => {
+    if (!engine || typeof engine.clearLatency !== 'function') return
+    try {
+      engine.clearLatency()
+    } catch (error) {
+      console.error('The delay numbers could not be cleared:', error)
+    }
+  }
+
+  const latencySummary = (): LatencyReply => {
+    if (!engine || typeof engine.latencySummary !== 'function') return { ok: false, error: delayMissing }
+    try {
+      const summary = engine.latencySummary()
+      return isLatencySummary(summary) ? { ok: true, summary } : { ok: false, error: delayUnreadable }
+    } catch (error) {
+      return { ok: false, error: reason(error, delayUnreadable) }
+    }
+  }
 
   return {
     state(): AudioState {
@@ -99,11 +144,15 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
         return view()
       }
       current = { phase: 'starting' }
+      // A new start means new settings, so the old key timings must not mix in. The engine can
+      // keep unread timings from the old session, so forget again once the start has settled.
+      forgetDelays()
       try {
         current = { phase: 'on', result: await engine.start(config) }
       } catch (error) {
         current = { phase: 'failed', error: reason(error, 'Sound could not start.') }
       }
+      forgetDelays()
       return view()
     },
 
@@ -190,6 +239,26 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
       } catch (error) {
         return { ok: false, error: reason(error, 'The piano could not be reconnected.') }
       }
+    },
+
+    // The delay test: the numbers so far, and a way to forget them.
+    latencySummary,
+
+    clearLatency(): LatencyClearReply {
+      if (!engine || typeof engine.clearLatency !== 'function') return { ok: false, error: delayMissing }
+      try {
+        engine.clearLatency()
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: reason(error, 'The delay numbers could not be cleared.') }
+      }
+    },
+
+    // The report text and JSON for the numbers now. Writing the files is the main process's job.
+    latencyReport(now: Date): LatencyReportReply {
+      const result = latencySummary()
+      if (!result.ok) return result
+      return { ok: true, text: reportText(result.summary, now), json: reportJson(result.summary, now) }
     }
   }
 }

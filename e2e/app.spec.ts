@@ -36,6 +36,8 @@ test('the Import file button is off and reachable by keyboard', async () => {
     await expect(importButton).toBeVisible()
     await expect(importButton).toHaveAttribute('aria-disabled', 'true')
 
+    await expect(window.getByRole('button', { name: 'Import file' })).toBeVisible()
+    await expect.poll(() => window.evaluate(() => document.hasFocus())).toBe(true)
     await window.keyboard.press('Tab')
     await expect(importButton).toBeFocused()
   } finally {
@@ -66,7 +68,7 @@ test('the window is locked down: no Node, no new windows, only the safe bridge',
     expect(result.process).toBe('undefined')
     expect(result.opened).toBeNull()
     expect(result.midi).toBe('denied')
-    expect(result.bridge).toEqual(['audio', 'midi', 'version'])
+    expect(result.bridge).toEqual(['audio', 'latency', 'midi', 'version'])
 
     await page.evaluate(() => {
       location.href = 'https://example.com'
@@ -101,6 +103,8 @@ test('the Sound screen opens from the library, says sound state, and goes back',
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
 
+    await expect(window.getByRole('button', { name: 'Import file' })).toBeVisible()
+    await expect.poll(() => window.evaluate(() => document.hasFocus())).toBe(true)
     // Import file stays first in the Tab order; the Sound link comes right after it.
     await window.keyboard.press('Tab')
     await window.keyboard.press('Tab')
@@ -136,6 +140,47 @@ test('the Sound screen opens from the library, says sound state, and goes back',
 
     await window.getByRole('link', { name: 'Back to your songs' }).click()
     await expect(window.getByRole('heading', { name: 'Your songs' })).toBeVisible()
+  } finally {
+    await app.close()
+  }
+})
+
+test('the Delay test opens from Sound, says there is no piano, and saves a report', async () => {
+  const app = await launch()
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+
+    await window.getByRole('link', { name: 'Sound' }).click()
+    await window.getByRole('link', { name: 'Test the delay' }).click()
+
+    await expect(window.getByRole('heading', { name: 'Delay test', level: 1 })).toBeVisible()
+    // This container has no MIDI ports, so the test asks for the piano first.
+    await expect(window.getByText('Connect the piano to run the test.')).toBeVisible({ timeout: 10_000 })
+    await expect(window.getByRole('button', { name: 'Reconnect piano' })).toBeVisible()
+    await expect(window.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
+    await expect(window.getByRole('progressbar')).toHaveAttribute('aria-valuemax', '20')
+
+    const saved = await window.evaluate(async () => {
+      const latency = (
+        window as unknown as {
+          pianoLearner: { latency: Record<string, () => Promise<unknown>> }
+        }
+      ).pianoLearner.latency
+      return { keys: Object.keys(latency).sort(), save: (await latency.save()) as { ok: boolean; path?: string } }
+    })
+    expect(saved.keys).toEqual(['clear', 'save', 'showFile', 'summary'])
+    expect(saved.save.ok).toBe(true)
+
+    // The report lands in the app's own user data folder, under fixed names.
+    const userData = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'))
+    expect(saved.save.path).toBe(path.join(userData, 'latency-report.txt'))
+    expect(fs.existsSync(saved.save.path ?? '')).toBe(true)
+    expect(fs.readFileSync(saved.save.path ?? '', 'utf8')).toContain('PianoLearner delay test')
+    expect(fs.existsSync(path.join(userData, 'latency-report.json'))).toBe(true)
+
+    await window.getByRole('link', { name: 'Back to Sound' }).click()
+    await expect(window.getByRole('heading', { name: 'Sound', level: 1 })).toBeVisible()
   } finally {
     await app.close()
   }

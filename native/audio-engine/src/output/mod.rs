@@ -2,7 +2,7 @@
 //! render thread. Nothing here is called from the audio callback except the
 //! small pure helpers.
 
-use crate::core::{Command, EngineStats};
+use crate::core::{clock, Command, EngineStats, LatencySample, MidiInput};
 use crate::midi::{MidiSink, MIDI_CAPACITY};
 use crate::piano::{bank_link, BankReceiver, BankSender, SampleBank};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -238,7 +238,8 @@ where
 /// `banks` brings the piano sound (see `piano::bank_link`).
 pub struct Inbox {
     pub commands: rtrb::Consumer<Command>,
-    pub midi: rtrb::Consumer<Command>,
+    /// The MIDI ring, with the producer the audio thread reports key timing on.
+    pub midi: MidiInput,
     pub banks: BankReceiver,
 }
 
@@ -247,7 +248,12 @@ pub struct Outbox {
     pub commands: rtrb::Producer<Command>,
     pub midi: rtrb::Producer<Command>,
     pub banks: BankSender,
+    /// Key timing from the audio thread.
+    pub latency: rtrb::Consumer<LatencySample>,
 }
+
+/// Room for key timing samples the control side has not collected yet.
+pub const LATENCY_RING_CAPACITY: usize = 256;
 
 /// Room in each ring of a bank link. Only one bank is ever sent per output.
 const BANK_LINK_CAPACITY: usize = 2;
@@ -257,9 +263,10 @@ pub fn rings(command_capacity: usize, midi_capacity: usize) -> (Outbox, Inbox) {
     let (commands_tx, commands_rx) = rtrb::RingBuffer::new(command_capacity);
     let (midi_tx, midi_rx) = rtrb::RingBuffer::new(midi_capacity);
     let (banks_tx, banks_rx) = bank_link(BANK_LINK_CAPACITY);
+    let (latency_tx, latency_rx) = rtrb::RingBuffer::new(LATENCY_RING_CAPACITY);
     (
-        Outbox { commands: commands_tx, midi: midi_tx, banks: banks_tx },
-        Inbox { commands: commands_rx, midi: midi_rx, banks: banks_rx },
+        Outbox { commands: commands_tx, midi: midi_tx, banks: banks_tx, latency: latency_rx },
+        Inbox { commands: commands_rx, midi: MidiInput::new(midi_rx, latency_tx), banks: banks_rx },
     )
 }
 
@@ -345,6 +352,111 @@ struct Session {
     info: StartInfo,
     commands: rtrb::Producer<Command>,
     banks: BankSender,
+    latency: rtrb::Consumer<LatencySample>,
+}
+
+/// What a key adds between the piano and the app that the app cannot measure:
+/// USB full-speed MIDI transport. A fixed estimate, and the report says so.
+pub const USB_MIDI_MS: f64 = 1.0;
+/// How many key timings the engine remembers.
+pub const LATENCY_HISTORY: usize = 200;
+
+/// One key press, in milliseconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LatencyReading {
+    pub note: u8,
+    /// MIDI callback to the start of the audio callback that picked it up.
+    pub wait_ms: f64,
+    /// From that callback to the sound leaving the device.
+    pub output_ms: f64,
+    /// `wait_ms + output_ms + USB_MIDI_MS`.
+    pub total_ms: f64,
+}
+
+/// Turn the audio thread's stamps into milliseconds. `output_ms` is the
+/// session's output latency.
+pub fn reading(sample: LatencySample, output_ms: f64) -> LatencyReading {
+    let wait_ms = sample.picked_us.saturating_sub(sample.midi_us) as f64 / 1000.0;
+    LatencyReading { note: sample.note, wait_ms, output_ms, total_ms: wait_ms + output_ms + USB_MIDI_MS }
+}
+
+/// Median, 95th percentile (nearest rank) and maximum of `values`. All zero
+/// for an empty list.
+pub fn summarize(values: &[f64]) -> (f64, f64, f64) {
+    if values.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let mut v = values.to_vec();
+    v.sort_by(f64::total_cmp);
+    let n = v.len();
+    let median = if n % 2 == 1 { v[n / 2] } else { (v[n / 2 - 1] + v[n / 2]) / 2.0 };
+    let rank = (n * 95).div_ceil(100).max(1);
+    (median, v[rank - 1], v[n - 1])
+}
+
+/// The last `LATENCY_HISTORY` readings, in a fixed ring.
+#[derive(Default)]
+pub struct LatencyHistory {
+    items: Vec<LatencyReading>,
+    /// Readings ever pushed since the last clear.
+    pushed: u64,
+    /// How many of those `take_new` already returned.
+    reported: u64,
+}
+
+impl LatencyHistory {
+    pub fn push(&mut self, r: LatencyReading) {
+        if self.items.len() < LATENCY_HISTORY {
+            self.items.push(r);
+        } else {
+            self.items[(self.pushed % LATENCY_HISTORY as u64) as usize] = r;
+        }
+        self.pushed += 1;
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// The remembered `total_ms` values (oldest first once full is not promised).
+    pub fn totals(&self) -> Vec<f64> {
+        self.items.iter().map(|r| r.total_ms).collect()
+    }
+
+    /// Readings not returned before, oldest first. Only the ones still
+    /// remembered (at most `LATENCY_HISTORY`).
+    pub fn take_new(&mut self) -> Vec<LatencyReading> {
+        let first = self.reported.max(self.pushed.saturating_sub(LATENCY_HISTORY as u64));
+        let out = (first..self.pushed).map(|i| self.items[(i % LATENCY_HISTORY as u64) as usize]).collect();
+        self.reported = self.pushed;
+        out
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.pushed = 0;
+        self.reported = 0;
+    }
+}
+
+/// How the engine is doing on key timing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LatencySummary {
+    pub count: usize,
+    pub median_ms: f64,
+    pub p95_ms: f64,
+    pub max_ms: f64,
+    /// Output latency of the running session (0 when none).
+    pub output_ms: f64,
+    pub buffer_frames: u32,
+    pub sample_rate: u32,
+    /// "" when no output runs.
+    pub backend: String,
+    pub underruns: u64,
 }
 
 /// How the piano sound is doing.
@@ -372,6 +484,7 @@ struct State {
     bank: Option<Arc<SampleBank>>,
     piano: PianoState,
     piano_info: Option<PianoInfo>,
+    latency: LatencyHistory,
 }
 
 /// Control side of the engine. The state lock is only held for quick
@@ -403,6 +516,7 @@ impl Drop for StartingFlag<'_> {
 
 impl Engine {
     pub fn new() -> Self {
+        clock::init();
         Self {
             stats: Arc::new(EngineStats::default()),
             state: Mutex::new(State {
@@ -412,6 +526,7 @@ impl Engine {
                 bank: None,
                 piano: PianoState::Loading,
                 piano_info: None,
+                latency: LatencyHistory::default(),
             }),
             starting: AtomicBool::new(false),
             loading: AtomicBool::new(false),
@@ -523,10 +638,11 @@ impl Engine {
         if let Some(mut old) = old {
             old.banks.reclaim();
             old.running.stop();
+            self.keep_latency(&mut old.latency, old.info.output_latency_ms);
         }
         self.stats.reset();
         let (running, info, outbox) = opener(cfg, &self.stats)?;
-        let Outbox { mut commands, midi, mut banks } = outbox;
+        let Outbox { mut commands, midi, mut banks, latency } = outbox;
         let mut st = self.state();
         if st.generation != generation {
             drop(st);
@@ -541,7 +657,7 @@ impl Engine {
             // The piano loaded before this output opened: it plays from the first buffer on.
             let _ = banks.send(Arc::clone(bank));
         }
-        st.session = Some(Session { running, info: info.clone(), commands, banks });
+        st.session = Some(Session { running, info: info.clone(), commands, banks, latency });
         self.midi.set(Some(midi));
         Ok(info)
     }
@@ -558,8 +674,68 @@ impl Engine {
         if let Some(mut s) = old {
             s.banks.reclaim();
             s.running.stop();
+            self.keep_latency(&mut s.latency, s.info.output_latency_ms);
             self.stats.running.store(false, Ordering::Release);
         }
+    }
+
+    /// Move what an ended session still holds into the history.
+    fn keep_latency(&self, ring: &mut rtrb::Consumer<LatencySample>, output_ms: f64) {
+        let mut st = self.state();
+        while let Ok(sample) = ring.pop() {
+            st.latency.push(reading(sample, output_ms));
+        }
+    }
+
+    /// Move what the running session's audio thread reported into the history.
+    fn collect_latency(st: &mut State) {
+        let State { session, latency, .. } = st;
+        if let Some(s) = session.as_mut() {
+            let output_ms = s.info.output_latency_ms;
+            while let Ok(sample) = s.latency.pop() {
+                latency.push(reading(sample, output_ms));
+            }
+        }
+    }
+
+    /// Key timings since the last call (at most the last 200).
+    pub fn latency_samples(&self) -> Vec<LatencyReading> {
+        let mut st = self.state();
+        Self::collect_latency(&mut st);
+        st.latency.take_new()
+    }
+
+    /// Median, 95th percentile and maximum of the remembered key timings, plus
+    /// what the running output looks like.
+    pub fn latency_summary(&self) -> LatencySummary {
+        let mut st = self.state();
+        Self::collect_latency(&mut st);
+        let totals = st.latency.totals();
+        let (median_ms, p95_ms, max_ms) = summarize(&totals);
+        let (output_ms, buffer_frames, sample_rate, backend) = match &st.session {
+            Some(s) => (s.info.output_latency_ms, s.info.buffer_frames, s.info.sample_rate, s.info.backend.clone()),
+            None => (0.0, 0, 0, String::new()),
+        };
+        LatencySummary {
+            count: totals.len(),
+            median_ms,
+            p95_ms,
+            max_ms,
+            output_ms,
+            buffer_frames,
+            sample_rate,
+            backend,
+            underruns: self.stats.underruns.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Forget every remembered key timing, and the ones still waiting.
+    pub fn clear_latency(&self) {
+        let mut st = self.state();
+        if let Some(s) = st.session.as_mut() {
+            while s.latency.pop().is_ok() {}
+        }
+        st.latency.clear();
     }
 
     pub fn play_test_tone(&self, frequency_hz: f32, seconds: f32) -> Result<(), String> {
@@ -732,7 +908,7 @@ mod tests {
     ) -> impl FnOnce(&StartConfig, &Arc<EngineStats>) -> Result<Opened, String> {
         move |_cfg, _stats| {
             let (out, inbox) = rings(8, 8);
-            *slot.lock().unwrap() = Some(inbox.midi);
+            *slot.lock().unwrap() = Some(inbox.midi.commands);
             let (running, info) = spawn_backend("fake", move |stop, ready| {
                 let _keep = inbox.commands;
                 let _ = ready.send(Ok(fake_info("fake")));
@@ -747,7 +923,7 @@ mod tests {
     #[test]
     fn each_start_hands_a_fresh_midi_ring_to_the_midi_side() {
         let e = Engine::new();
-        let key = Command::NoteOn { note: 60, velocity: 90 };
+        let key = Command::NoteOn { note: 60, velocity: 90, midi_us: 11 };
         let first = Arc::new(Mutex::new(None));
         e.start_with(&StartConfig::default(), midi_opener(Arc::clone(&first))).unwrap();
         assert!(e.midi_sink().push(key));
@@ -909,7 +1085,7 @@ mod tests {
             let (out, inbox) = rings(8, 8);
             *slot.lock().unwrap() = Some(inbox.banks);
             let (running, info) = spawn_backend("fake", move |stop, ready| {
-                let _keep = (inbox.commands, inbox.midi);
+                let _keep = (inbox.commands, inbox.midi.commands);
                 let _ = ready.send(Ok(fake_info("fake")));
                 while !stop.load(Ordering::Acquire) {
                     thread::park_timeout(Duration::from_millis(20));
@@ -1070,5 +1246,175 @@ mod tests {
         assert_eq!(r.err().unwrap(), "The sound device did not answer in time.");
         thread::sleep(Duration::from_millis(400));
         assert!(saw_stop.load(Ordering::Acquire), "late thread was never told to stop");
+    }
+
+    // ---- latency history and summary ----
+
+    fn ms(total: f64) -> LatencyReading {
+        LatencyReading { note: 60, wait_ms: total - 1.0, output_ms: 0.0, total_ms: total }
+    }
+
+    #[test]
+    fn total_is_wait_plus_output_plus_one_ms_of_usb() {
+        let r = reading(LatencySample { note: 61, midi_us: 1_000, picked_us: 3_500 }, 4.25);
+        assert_eq!(r.note, 61);
+        assert!((r.wait_ms - 2.5).abs() < 1e-9);
+        assert!((r.output_ms - 4.25).abs() < 1e-9);
+        assert!((r.total_ms - 7.75).abs() < 1e-9, "2.5 + 4.25 + 1.0, got {}", r.total_ms);
+        assert!((USB_MIDI_MS - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_pick_time_before_the_stamp_counts_as_no_wait() {
+        let r = reading(LatencySample { note: 1, midi_us: 900, picked_us: 100 }, 2.0);
+        assert!(r.wait_ms.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn summary_maths_on_a_known_list() {
+        let list: Vec<f64> = (1..=20).map(f64::from).collect();
+        let (median, p95, max) = summarize(&list);
+        assert!((median - 10.5).abs() < 1e-9, "even count: mean of the two middle ones");
+        assert!((p95 - 19.0).abs() < 1e-9, "nearest rank: ceil(0.95 * 20) = 19th value");
+        assert!((max - 20.0).abs() < 1e-9);
+        let (median, p95, max) = summarize(&[9.0, 1.0, 5.0]);
+        assert_eq!((median, p95, max), (5.0, 9.0, 9.0), "unsorted input, odd count");
+        assert_eq!(summarize(&[4.0]), (4.0, 4.0, 4.0));
+        assert_eq!(summarize(&[]), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn history_keeps_only_the_last_200() {
+        let mut h = LatencyHistory::default();
+        for i in 1..=250 {
+            h.push(ms(f64::from(i)));
+        }
+        assert_eq!(h.len(), LATENCY_HISTORY);
+        let totals = h.totals();
+        assert_eq!(totals.len(), 200);
+        assert!((totals.iter().cloned().fold(f64::MAX, f64::min) - 51.0).abs() < 1e-9, "the first 50 fell out");
+        assert!((totals.iter().cloned().fold(0.0, f64::max) - 250.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn take_new_returns_each_sample_once_in_order() {
+        let mut h = LatencyHistory::default();
+        h.push(ms(1.0));
+        h.push(ms(2.0));
+        let first: Vec<f64> = h.take_new().iter().map(|r| r.total_ms).collect();
+        assert_eq!(first, vec![1.0, 2.0]);
+        assert!(h.take_new().is_empty());
+        h.push(ms(3.0));
+        assert_eq!(h.take_new().len(), 1);
+        assert_eq!(h.len(), 3, "reporting does not shrink the history behind the summary");
+    }
+
+    #[test]
+    fn take_new_after_more_than_200_new_samples_gives_the_last_200() {
+        let mut h = LatencyHistory::default();
+        for i in 1..=300 {
+            h.push(ms(f64::from(i)));
+        }
+        let got = h.take_new();
+        assert_eq!(got.len(), 200);
+        assert!((got[0].total_ms - 101.0).abs() < 1e-9);
+        assert!((got[199].total_ms - 300.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn clear_empties_history_and_starts_the_new_samples_fresh() {
+        let mut h = LatencyHistory::default();
+        h.push(ms(1.0));
+        h.clear();
+        assert_eq!(h.len(), 0);
+        assert!(h.take_new().is_empty());
+        h.push(ms(2.0));
+        assert_eq!(h.take_new().len(), 1);
+    }
+
+    /// An opener that keeps the audio side's latency producer.
+    fn latency_opener(
+        slot: Arc<Mutex<Option<rtrb::Producer<LatencySample>>>>,
+    ) -> impl FnOnce(&StartConfig, &Arc<EngineStats>) -> Result<Opened, String> {
+        move |_cfg, _stats| {
+            let (out, inbox) = rings(8, 8);
+            *slot.lock().unwrap() = inbox.midi.latency;
+            let (running, info) = spawn_backend("fake", move |stop, ready| {
+                let _keep = (inbox.commands, inbox.midi.commands);
+                let _ = ready.send(Ok(fake_info("fake")));
+                while !stop.load(Ordering::Acquire) {
+                    thread::park_timeout(Duration::from_millis(20));
+                }
+            })?;
+            Ok((running, info, out))
+        }
+    }
+
+    #[test]
+    fn engine_with_no_output_reports_zeros_and_no_samples() {
+        let e = Engine::new();
+        let s = e.latency_summary();
+        assert_eq!(s.count, 0);
+        assert_eq!((s.median_ms, s.p95_ms, s.max_ms, s.output_ms), (0.0, 0.0, 0.0, 0.0));
+        assert_eq!((s.buffer_frames, s.sample_rate, s.underruns), (0, 0, 0));
+        assert_eq!(s.backend, "");
+        assert!(e.latency_samples().is_empty());
+        e.clear_latency();
+    }
+
+    #[test]
+    fn engine_turns_audio_thread_samples_into_readings_with_the_session_output_latency() {
+        let e = Engine::new();
+        let slot = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), latency_opener(Arc::clone(&slot))).unwrap();
+        let mut tx = slot.lock().unwrap().take().expect("the audio side holds a latency producer");
+        tx.push(LatencySample { note: 60, midi_us: 10_000, picked_us: 11_000 }).unwrap();
+        tx.push(LatencySample { note: 62, midi_us: 20_000, picked_us: 22_000 }).unwrap();
+        let got = e.latency_samples();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].note, 60);
+        assert!((got[0].wait_ms - 1.0).abs() < 1e-9);
+        assert!((got[0].output_ms - 2.7).abs() < 1e-9, "from StartInfo.output_latency_ms");
+        assert!((got[0].total_ms - 4.7).abs() < 1e-9, "1.0 + 2.7 + 1.0");
+        assert!((got[1].total_ms - 5.7).abs() < 1e-9);
+        assert!(e.latency_samples().is_empty(), "only new samples are returned");
+
+        let s = e.latency_summary();
+        assert_eq!(s.count, 2);
+        assert!((s.median_ms - 5.2).abs() < 1e-9);
+        assert!((s.max_ms - 5.7).abs() < 1e-9);
+        assert!((s.output_ms - 2.7).abs() < 1e-9);
+        assert_eq!((s.buffer_frames, s.sample_rate), (128, 48_000));
+        assert_eq!(s.backend, "cpal");
+
+        e.clear_latency();
+        assert_eq!(e.latency_summary().count, 0);
+        tx.push(LatencySample { note: 64, midi_us: 1, picked_us: 2 }).unwrap();
+        assert_eq!(e.latency_summary().count, 1, "samples after a clear count again");
+        e.stop();
+    }
+
+    #[test]
+    fn clear_also_throws_away_samples_still_waiting_in_the_ring() {
+        let e = Engine::new();
+        let slot = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), latency_opener(Arc::clone(&slot))).unwrap();
+        let mut tx = slot.lock().unwrap().take().unwrap();
+        tx.push(LatencySample { note: 60, midi_us: 1, picked_us: 2 }).unwrap();
+        e.clear_latency();
+        assert_eq!(e.latency_summary().count, 0);
+        e.stop();
+    }
+
+    #[test]
+    fn samples_still_in_the_ring_when_the_output_stops_are_kept() {
+        let e = Engine::new();
+        let slot = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), latency_opener(Arc::clone(&slot))).unwrap();
+        let mut tx = slot.lock().unwrap().take().unwrap();
+        tx.push(LatencySample { note: 60, midi_us: 1, picked_us: 2 }).unwrap();
+        e.stop();
+        assert_eq!(e.latency_summary().count, 1);
+        assert_eq!(e.latency_summary().backend, "", "no output now");
     }
 }

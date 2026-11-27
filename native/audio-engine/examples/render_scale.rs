@@ -38,7 +38,7 @@ fn main() -> Result<(), String> {
             all.extend_from_slice(&buf);
         };
         for note in SCALE {
-            mixer.handle(Command::NoteOn { note, velocity });
+            mixer.handle(Command::NoteOn { note, velocity, midi_us: 0 });
             section(&mut mixer, 0.5, &mut all);
             mixer.handle(Command::NoteOff { note });
             section(&mut mixer, 0.1, &mut all);

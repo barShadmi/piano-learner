@@ -76,7 +76,7 @@ fn process_never_allocates_with_note_commands_from_both_rings() {
     for i in 0..3000u32 {
         let note = 30 + (i % 80) as u8;
         // More than 64 notes held at once forces stealing.
-        let _ = midi_tx.push(Command::NoteOn { note, velocity: 1 + (i % 127) as u8 });
+        let _ = midi_tx.push(Command::NoteOn { note, velocity: 1 + (i % 127) as u8, midi_us: 0 });
         if i % 3 == 0 {
             let _ = midi_tx.push(Command::NoteOff { note: 30 + ((i + 7) % 80) as u8 });
         }
@@ -87,7 +87,7 @@ fn process_never_allocates_with_note_commands_from_both_rings() {
             let _ = midi_tx.push(Command::AllNotesOff);
         }
         if i % 5 == 0 {
-            let _ = tx.push(Command::NoteOn { note: 60, velocity: 90 });
+            let _ = tx.push(Command::NoteOn { note: 60, velocity: 90, midi_us: 0 });
             let _ = tx.push(Command::NoteOff { note: 60 });
         }
         if i % 50 == 0 {
@@ -125,12 +125,12 @@ fn busy_notes(core: &mut EngineCore, midi_tx: &mut rtrb::Producer<Command>, out:
     for i in 0..rounds {
         let note = 21 + (i % 88) as u8;
         // More than 64 notes held at once forces stealing; the 0.3 s samples also run out by themselves.
-        let _ = midi_tx.push(Command::NoteOn { note, velocity: 1 + (i % 127) as u8 });
+        let _ = midi_tx.push(Command::NoteOn { note, velocity: 1 + (i % 127) as u8, midi_us: 0 });
         if i % 3 == 0 {
             let _ = midi_tx.push(Command::NoteOff { note: 21 + ((i + 7) % 88) as u8 });
         }
         if i % 5 == 0 {
-            let _ = midi_tx.push(Command::NoteOn { note: 60, velocity: 90 }); // same note again
+            let _ = midi_tx.push(Command::NoteOn { note: 60, velocity: 90, midi_us: 0 }); // same note again
         }
         if i % 97 == 0 {
             let _ = midi_tx.push(Command::Sustain(i % 2 == 0));
@@ -180,4 +180,36 @@ fn process_neither_allocates_nor_frees_when_banks_arrive_through_the_ring() {
     assert_eq!(ALLOCS.load(Ordering::SeqCst), 0, "audio path allocated");
     assert_eq!(FREES.load(Ordering::SeqCst), 0, "audio path freed memory");
     assert_eq!(sender.reclaim(), 1, "the replaced bank came back through the return ring");
+}
+
+#[test]
+fn process_never_allocates_with_latency_samples_even_when_the_ring_is_full() {
+    use audio_engine::core::{clock, LatencySample, MidiInput};
+    let (_tx, rx) = channel(64);
+    let (mut midi_tx, midi_rx) = channel(256);
+    // Small on purpose: it fills up, so both the push and the drop are exercised.
+    let (lat_tx, mut lat_rx) = rtrb::RingBuffer::<LatencySample>::new(8);
+    let mut core = EngineCore::with_midi(rx, MidiInput::new(midi_rx, lat_tx), Mixer::new(48_000, 2));
+    let mut out = vec![0.0f32; 2 * 128];
+    clock::init();
+
+    ARMED.with(|a| a.set(true));
+    for i in 0..3000u32 {
+        let note = 30 + (i % 80) as u8;
+        let _ = midi_tx.push(Command::NoteOn { note, velocity: 1 + (i % 127) as u8, midi_us: clock::now_us() });
+        if i % 3 == 0 {
+            let _ = midi_tx.push(Command::NoteOff { note: 30 + ((i + 7) % 80) as u8 });
+        }
+        core.process(&mut out);
+        if i % 20 == 19 {
+            // Drain now and then, like the control side, so the ring is sometimes full and sometimes not.
+            ARMED.with(|a| a.set(false));
+            while lat_rx.pop().is_ok() {}
+            ARMED.with(|a| a.set(true));
+        }
+    }
+    ARMED.with(|a| a.set(false));
+
+    assert_eq!(ALLOCS.load(Ordering::SeqCst), 0, "audio path allocated");
+    assert_eq!(FREES.load(Ordering::SeqCst), 0, "audio path freed memory");
 }

@@ -11,10 +11,22 @@ pub enum MidiEvent {
     AllNotesOff,
 }
 
+impl MidiEvent {
+    /// The command for the audio thread. A Note On carries `midi_us`, the time
+    /// the MIDI callback got it (see `core::clock`).
+    pub fn into_command(self, midi_us: u64) -> Command {
+        match self {
+            MidiEvent::NoteOn { note, velocity } => Command::NoteOn { note, velocity, midi_us },
+            other => other.into(),
+        }
+    }
+}
+
 impl From<MidiEvent> for Command {
+    /// Unstamped (`midi_us` 0). The MIDI callback uses `into_command`.
     fn from(e: MidiEvent) -> Self {
         match e {
-            MidiEvent::NoteOn { note, velocity } => Command::NoteOn { note, velocity },
+            MidiEvent::NoteOn { note, velocity } => Command::NoteOn { note, velocity, midi_us: 0 },
             MidiEvent::NoteOff { note } => Command::NoteOff { note },
             MidiEvent::Sustain(down) => Command::Sustain(down),
             MidiEvent::AllNotesOff => Command::AllNotesOff,
@@ -113,10 +125,26 @@ mod tests {
     fn events_convert_to_commands() {
         assert_eq!(
             Command::from(MidiEvent::NoteOn { note: 60, velocity: 90 }),
-            Command::NoteOn { note: 60, velocity: 90 }
+            Command::NoteOn { note: 60, velocity: 90, midi_us: 0 }
         );
         assert_eq!(Command::from(MidiEvent::NoteOff { note: 60 }), Command::NoteOff { note: 60 });
         assert_eq!(Command::from(MidiEvent::Sustain(true)), Command::Sustain(true));
         assert_eq!(Command::from(MidiEvent::AllNotesOff), Command::AllNotesOff);
+    }
+
+    #[test]
+    fn a_stamp_goes_only_onto_note_on() {
+        assert_eq!(
+            MidiEvent::NoteOn { note: 60, velocity: 90 }.into_command(1234),
+            Command::NoteOn { note: 60, velocity: 90, midi_us: 1234 }
+        );
+        assert_eq!(MidiEvent::NoteOff { note: 60 }.into_command(1234), Command::NoteOff { note: 60 });
+        assert_eq!(MidiEvent::Sustain(true).into_command(9), Command::Sustain(true));
+        assert_eq!(MidiEvent::AllNotesOff.into_command(9), Command::AllNotesOff);
+    }
+
+    #[test]
+    fn parse_still_returns_the_same_events() {
+        assert_eq!(parse(&[0x90, 60, 100]), Some(MidiEvent::NoteOn { note: 60, velocity: 100 }));
     }
 }
