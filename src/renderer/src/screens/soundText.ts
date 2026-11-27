@@ -77,11 +77,11 @@ export function lastKeyLine(event: MidiEvent | undefined): string {
 export function pianoSoundLine(piano: PianoSound): string {
   switch (piano) {
     case 'loading':
-      return 'Piano sound is loading…'
+      return 'Piano sound: loading… (you hear a simple tone until it is ready)'
     case 'ready':
-      return 'Piano sound is ready.'
+      return 'Piano sound: ready'
     case 'failed':
-      return 'Piano sound could not load. You hear a simple tone instead.'
+      return 'Piano sound: could not load. You hear a simple tone instead.'
   }
 }
 

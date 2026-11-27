@@ -1283,6 +1283,83 @@ mod tests {
         e.stop();
     }
 
+    /// A bank that is silent: a key played through it makes no sound, so a
+    /// loud key means the stand-in voice is still in use.
+    fn silent_bank() -> Result<SampleBank, String> {
+        let mut v = Vec::new();
+        for layer in 0..4u8 {
+            let mut n = 21u8;
+            while n <= 108 {
+                v.push(crate::piano::testing::sine_sample(n, layer, 440.0, 0.0, 0.2));
+                n += 3;
+            }
+        }
+        Ok(SampleBank::from_samples(v))
+    }
+
+    /// An opener that runs a real `EngineCore` on its thread, like a backend
+    /// does, and keeps the loudest sample of the last buffer in `peak`.
+    fn real_core_opener(
+        peak: Arc<std::sync::atomic::AtomicU32>,
+    ) -> impl FnOnce(&StartConfig, &Arc<EngineStats>) -> Result<Opened, String> {
+        move |_cfg, _stats| {
+            let (out, inbox) = rings(8, 8);
+            let (running, info) = spawn_backend("real-core", move |stop, ready| {
+                let mut core = crate::core::EngineCore::with_midi(inbox.commands, inbox.midi, crate::core::Mixer::new(48_000, 1))
+                    .with_bank_link(inbox.banks);
+                let _ = ready.send(Ok(fake_info("real")));
+                let mut buf = [0.0f32; 256];
+                while !stop.load(Ordering::Acquire) {
+                    core.process(&mut buf);
+                    let loudest = buf.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+                    peak.store(loudest.to_bits(), Ordering::Release);
+                    thread::sleep(Duration::from_millis(2));
+                }
+            })?;
+            Ok((running, info, out))
+        }
+    }
+
+    fn loudest_after_a_key(e: &Engine, peak: &std::sync::atomic::AtomicU32) -> f32 {
+        assert!(e.midi_sink().push(Command::NoteOn { note: 60, velocity: 100, midi_us: 0 }));
+        thread::sleep(Duration::from_millis(100));
+        f32::from_bits(peak.load(Ordering::Acquire))
+    }
+
+    #[test]
+    fn an_output_that_opens_while_the_load_runs_plays_the_piano_not_the_stand_in() {
+        let e = Arc::new(Engine::new());
+        let peak = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let (gate_tx, gate_rx) = mpsc::channel();
+        let (open_tx, open_rx) = mpsc::channel();
+        let (e2, peak2) = (Arc::clone(&e), Arc::clone(&peak));
+        let starting = thread::spawn(move || {
+            e2.start_with(&StartConfig::default(), move |cfg, stats| {
+                let _ = open_tx.send(());
+                let _ = gate_rx.recv();
+                real_core_opener(peak2)(cfg, stats)
+            })
+        });
+        open_rx.recv().unwrap();
+        e.load_piano_with(silent_bank).unwrap(); // the load ends while the output is opening
+        gate_tx.send(()).unwrap();
+        starting.join().unwrap().unwrap();
+        thread::sleep(Duration::from_millis(50));
+        assert!(loudest_after_a_key(&e, &peak) < 0.001, "the stand-in voice is still playing");
+        e.stop();
+    }
+
+    #[test]
+    fn an_output_that_is_running_when_the_load_ends_switches_to_the_piano() {
+        let e = Engine::new();
+        let peak = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        e.start_with(&StartConfig::default(), real_core_opener(Arc::clone(&peak))).unwrap();
+        e.load_piano_with(silent_bank).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        assert!(loudest_after_a_key(&e, &peak) < 0.001, "the stand-in voice is still playing");
+        e.stop();
+    }
+
     #[test]
     fn a_failed_load_leaves_sound_running_with_the_stand_in_voice() {
         let e = Engine::new();

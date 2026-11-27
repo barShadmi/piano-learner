@@ -138,10 +138,12 @@ describe('lastKeyLine', () => {
 
 describe('pianoSoundLine', () => {
   it('says the piano sound is loading, ready, or could not load', () => {
-    expect(pianoSoundLine('loading')).toBe('Piano sound is loading…')
-    expect(pianoSoundLine('ready')).toBe('Piano sound is ready.')
+    expect(pianoSoundLine('loading')).toBe(
+      'Piano sound: loading… (you hear a simple tone until it is ready)'
+    )
+    expect(pianoSoundLine('ready')).toBe('Piano sound: ready')
     expect(pianoSoundLine('failed')).toBe(
-      'Piano sound could not load. You hear a simple tone instead.'
+      'Piano sound: could not load. You hear a simple tone instead.'
     )
   })
 
