@@ -10,7 +10,7 @@ Tags: (B) builder, (B+) builder-plus, (L) lead. `hard` steps go straight to buil
 - [x] Latency test and report, target under 10 ms (B+, hard)
 - [x] Settings: output device, driver, buffer size, volume; headphones by default (B) [frontend-design]
 - [x] 88-key virtual keyboard that lights the keys you press (B) [frontend-design]
-- [ ] Falling notes view at 60 fps, a colour per hand (B+) [frontend-design, animate]
+- [x] Falling notes view at 60 fps, a colour per hand (B+) [frontend-design, animate]
 - [ ] Import MIDI and MusicXML files; Listen mode plays a song (B) [test-driven-development]
 
 ## Gate

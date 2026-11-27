@@ -171,6 +171,87 @@ test('the Play screen opens from the library, shows 88 keys, and goes back by ke
   }
 })
 
+test('the falling notes run, pause, reset, and look right in light and dark', async () => {
+  test.setTimeout(60_000)
+  const app = await launch()
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+    // Open, leave and open again: the view starts cleanly a second time.
+    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
+    await window.getByRole('link', { name: 'Back to your songs' }).click()
+    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await expect(window.getByText('The falling notes could not start on this PC.')).toHaveCount(0)
+
+    const notes = window.locator('[data-frames]')
+    const frames = async (): Promise<number> => Number(await notes.getAttribute('data-frames'))
+    // The canvas is there and the view is drawing.
+    await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
+    await expect.poll(frames, { timeout: 15_000 }).toBeGreaterThan(0)
+
+    // Not started: the picture is not redrawn (render on demand).
+    await window.waitForTimeout(700)
+    const idle = await frames()
+    await window.waitForTimeout(700)
+    expect(await frames()).toBe(idle)
+
+    // The canvas is exactly as wide as the keyboard.
+    const widths = await window.evaluate(() => ({
+      canvas: document.querySelector('[data-frames] canvas')?.getBoundingClientRect().width,
+      keyboard: document.querySelector('[role="img"]')?.getBoundingClientRect().width
+    }))
+    expect(widths.canvas).toBe(widths.keyboard)
+
+    await window.getByRole('button', { name: 'Start', exact: true }).click()
+    const before = await frames()
+    // At least 30 frames a second: 45 new frames within 1.5 s of drawing, polled because
+    // the count is only written twice a second.
+    await expect.poll(async () => (await frames()) - before, { timeout: 3000 }).toBeGreaterThanOrEqual(45)
+    await window.waitForTimeout(600)
+    const fps = Number(await notes.getAttribute('data-fps'))
+    console.log(`falling notes: data-fps=${fps}`)
+    expect(fps).toBeGreaterThanOrEqual(30)
+
+    // Pause stops the song clock: the lit keys stop changing and the frames stop growing.
+    await window.getByRole('button', { name: 'Pause' }).click()
+    const lit = async (): Promise<string> =>
+      window.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-note]'))
+          .filter((e) => ['right', 'left'].includes(e.getAttribute('data-state') ?? ''))
+          .map((e) => `${e.getAttribute('data-note') ?? ''}${e.getAttribute('data-state') ?? ''}`)
+          .join(',')
+      )
+    const pausedLit = await lit()
+    await window.waitForTimeout(800)
+    const pausedFrames = await frames()
+    await window.waitForTimeout(800)
+    expect(await lit()).toBe(pausedLit)
+    expect(await frames()).toBe(pausedFrames)
+
+    // Back to the start: nothing is lit (the song begins 2 s before its first note).
+    await window.getByRole('button', { name: 'Back to the start' }).click()
+    await expect.poll(lit).toBe('')
+
+    // Screenshots 4 s into the song, in both themes.
+    const shots = process.env['FALLING_SHOTS']
+    for (const theme of ['light', 'dark'] as const) {
+      await window.evaluate((t) => {
+        document.documentElement.dataset.theme = t
+      }, theme)
+      await window.getByRole('button', { name: 'Back to the start' }).click()
+      await window.getByRole('button', { name: 'Start', exact: true }).click()
+      await window.waitForTimeout(4000)
+      await expect.poll(async () => (await lit()) !== '').toBe(true)
+      if (shots) await window.screenshot({ path: path.join(shots, `falling-${theme}.png`) })
+      await window.getByRole('button', { name: 'Pause' }).click()
+    }
+  } finally {
+    await app.close()
+  }
+})
+
 test('the Delay test opens from Sound, says there is no piano, and saves a report', async () => {
   const app = await launch()
   try {

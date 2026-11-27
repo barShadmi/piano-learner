@@ -1,0 +1,25 @@
+/* The notes area fills the space above the keyboard. The canvas sits inside it and follows its size. */
+.wrap {
+  position: relative;
+  flex: 1;
+  min-height: var(--space-9);
+  overflow: hidden;
+  /* An outline drawn inside, not a border, so the canvas is exactly as wide as the keyboard. */
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+  background: var(--surface);
+}
+
+.wrap canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.failed {
+  margin: 0;
+  padding: var(--space-5);
+  font-size: var(--text-lg);
+  color: var(--text);
+}
