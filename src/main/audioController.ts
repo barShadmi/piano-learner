@@ -136,7 +136,7 @@ export function createAudioController(
 
   // Forgets the remembered key timings. Never throws.
   const forgetDelays = (): void => {
-    if (!engine || typeof engine.clearLatency !== 'function') return
+    if (!engine || typeof engine.clearLatency !== 'function' || keepDelays) return
     try {
       engine.clearLatency()
     } catch (error) {
@@ -260,35 +260,63 @@ export function createAudioController(
   let restarts = 0
   let healthyChecks = 0
   let checking = false
+  // True during an automatic restart: the delay numbers are kept, not cleared.
+  let keepDelays = false
   const phaseNow = (): AudioState['phase'] => current.phase
 
-  // When the engine says the device stalled or failed while sound is on, restarts the output the
-  // same way a Mode switch does: up to 3 tries with a growing wait, then the failure is shown
-  // (with Try again). Never throws.
+  const stalled = (): boolean => {
+    try {
+      return engine!.status().failed
+    } catch {
+      return false
+    }
+  }
+
+  const stalledReason =
+    'The sound device stopped responding. Press Try again, or set Mode to Shared with other apps.'
+
+  // When the engine says the device stalled or failed while sound is on, restarts the output
+  // through the normal settings path (so it uses the settings Bar has now): up to 3 tries with a
+  // growing wait. If the device still stalls after the last try, the failure is shown (with Try
+  // again). The delay numbers are kept. Never throws.
   const checkHealth = async (): Promise<void> => {
     if (checking || !engine || current.phase !== 'on' || pendingStart || applying || !runningConfig) return
-    let failed: boolean
-    try {
-      failed = engine.status().failed
-    } catch {
-      return
-    }
-    if (!failed) {
+    if (!stalled()) {
       if (++healthyChecks >= 5) restarts = 0
       return
     }
     healthyChecks = 0
     checking = true
     try {
-      const config = runningConfig
+      const lastConfig = runningConfig
+      let failedByRestart = false
       while (restarts < restartBackoffMs.length) {
         const wait = restartBackoffMs[restarts] ?? 0
         restarts++
         await new Promise<void>((resolve) => setTimeout(resolve, wait))
-        const now = phaseNow()
-        if (now === 'off' || now === 'starting') return // stopped or restarted by someone else meanwhile
-        await start(config)
-        if (phaseNow() === 'on') return
+        // Someone else took over during the wait (Mode change, Try again, stop): leave it to them.
+        const phase = phaseNow()
+        const stillOurs = phase === 'on' ? stalled() : failedByRestart && phase === 'failed'
+        if (applying || pendingStart || !stillOurs) return
+        keepDelays = true
+        try {
+          if (wanted) {
+            forceRestart = true
+            await applySettings(wanted)
+          } else {
+            await start(lastConfig)
+          }
+        } finally {
+          keepDelays = false
+        }
+        const after = phaseNow()
+        if (after === 'on' && !stalled()) return
+        failedByRestart = after === 'failed' // a failed restart shows its own reason; try again
+        if (after !== 'on' && after !== 'failed') return
+      }
+      if (phaseNow() === 'on' && stalled()) {
+        current = { phase: 'failed', error: stalledReason }
+        runningConfig = undefined
       }
     } finally {
       checking = false
