@@ -61,3 +61,8 @@ Files: `api.rs`, `ipc.ts`, `audioController.ts`, `songEvents.ts` + test, `songSt
 ## Not fixed now (to `../later.md`)
 Typed IPC map (code 2), song/live voices by source (code 3), file splits (code 4, 5), audioController older-addon branches (code 6, last part), Windows cargo test + clippy in CI (code 7), WASAPI late-buffer underrun count (perf 1), instant steal (perf 2), locked sample memory (perf 4), render-time budget test (perf 5), long-frame e2e on a dense song (perf 6), axe in e2e (a11y 9), Play layout at 1024x640 (design 7), panel widths at 1920 (design 12).
 Re-shoot of the state screenshots (design 3, student 9) happens before round 2.
+
+## Added by the lead after the fixes
+- Fix 7 · Play layout at 1024x640 (design 7, words 10): the new status slot and hint left only ~95 px of falling area at the smallest window, so design 7 moved in from later. The song title becomes the h1; piano status and pedal share one compact line; target ≥ 240 px of falling area.
+- Small lead fixes: "Open Sound" link on Play; busy-device reason gives a next step; library status wraps long titles; report hint no longer names the removed button; legend explains the edge stripe.
+- Not changed, and why: the 2 px press move on keys (design 5) is one of the three press signals chosen in the keyboard plan (task 7); kept.
