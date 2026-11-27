@@ -284,7 +284,7 @@ test('Listen asks for the song to be heard; with no sound it says why and the fa
     await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
       timeout: 10_000
     })
-    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveAttribute('href', '#/sound')
+    await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveAttribute('href', '#/sound')
     // The song runs without sound: Watch shows as the mode that is on and Pause works.
     await expect(window.getByRole('button', { name: 'Watch (no sound)' })).toHaveAttribute('aria-pressed', 'true')
     await expect(window.getByRole('button', { name: 'Pause' })).toHaveAttribute('aria-disabled', 'false')
@@ -319,7 +319,7 @@ test('Watch during Listen silences it: a waiting start is cancelled and no sound
     await expect(window.getByRole('status').filter({ hasText: 'Playing with sound.' })).toHaveCount(0)
     await window.waitForTimeout(3000)
     await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
-    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveCount(0)
+    await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveCount(0)
   } finally {
     await app.close()
   }
@@ -340,7 +340,7 @@ test('Watch clears the sound message that Listen showed', async () => {
     })
     await window.getByRole('button', { name: 'Watch (no sound)' }).click()
     await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
-    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveCount(0)
+    await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveCount(0)
   } finally {
     await app.close()
   }

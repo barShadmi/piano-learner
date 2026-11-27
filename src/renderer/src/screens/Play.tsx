@@ -300,7 +300,7 @@ function PlaySong({ song }: { song: Song }) {
           </p>
           {view.soundLink ? (
             <a href="#/sound" className="button button-secondary">
-              Open Sound settings
+              Open Sound
             </a>
           ) : null}
         </div>

@@ -136,7 +136,7 @@ pub fn f32_to_i24_in_i32(x: f32) -> i32 {
 /// Plain-English text for the Windows audio error codes we can meet.
 pub fn friendly_hresult(code: u32) -> String {
     match code {
-        0x8889_000A => "The sound device is busy. Another app may be using it in exclusive mode.".into(),
+        0x8889_000A => "The sound device is busy. Another app may be using it on its own. Close other sound apps and press Try again.".into(),
         0x8889_0008 => "The sound device does not support the sound format PianoLearner needs.".into(),
         0x8889_000E => "Exclusive mode is turned off for this sound device in Windows settings.".into(),
         0x8889_0004 => "The sound device was unplugged or changed.".into(),
@@ -894,7 +894,7 @@ mod tests {
     #[test]
     fn busy_device_error_is_plain_english() {
         let msg = friendly_hresult(0x8889_000A);
-        assert_eq!(msg, "The sound device is busy. Another app may be using it in exclusive mode.");
+        assert_eq!(msg, "The sound device is busy. Another app may be using it on its own. Close other sound apps and press Try again.");
         // No raw hex code in the words Bar reads.
         assert!(!friendly_hresult(0x1234_5678).contains("0x"));
         assert_eq!(friendly_hresult(0x1234_5678), "The sound device could not be opened.");

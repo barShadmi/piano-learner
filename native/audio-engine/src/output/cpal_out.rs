@@ -76,7 +76,7 @@ fn friendly(e: cpal::Error) -> String {
     }
     match e.kind() {
         ErrorKind::DeviceBusy => {
-            "The sound device is busy. Another app may be using it in exclusive mode.".to_string()
+            "The sound device is busy. Another app may be using it on its own. Close other sound apps and press Try again.".to_string()
         }
         ErrorKind::DeviceNotAvailable => {
             "The sound device is not available. It may have been unplugged.".to_string()
