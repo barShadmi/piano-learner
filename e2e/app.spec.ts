@@ -29,3 +29,27 @@ test('the Import file button is off and reachable by keyboard', async () => {
     await app.close()
   }
 })
+
+test('the window is locked down: no Node, no new windows, only the safe bridge', async () => {
+  const app = await electron.launch({ args: ['.', '--no-sandbox'] })
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+
+    const result = await page.evaluate(() => ({
+      require: typeof (globalThis as { require?: unknown }).require,
+      process: typeof (globalThis as { process?: unknown }).process,
+      opened: window.open('https://example.com'),
+      bridge: Object.keys(
+        (window as unknown as { pianoLearner: Record<string, unknown> }).pianoLearner
+      ).sort()
+    }))
+
+    expect(result.require).toBe('undefined')
+    expect(result.process).toBe('undefined')
+    expect(result.opened).toBeNull()
+    expect(['forcedTheme,version', 'version']).toContain(result.bridge.join(','))
+  } finally {
+    await app.close()
+  }
+})

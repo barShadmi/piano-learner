@@ -70,3 +70,4 @@ Acceptance: all tests pass, typecheck, lint; only the listed files change.
 | --- | --- | --- | --- |
 | 1 | builder (Haiku) | 1 | PASS |
 | 2 | builder (Haiku) | 1 | PASS (lead added a comment on how accent follows the theme) |
+| 3 | builder-plus (Sonnet) | 1 | PASS (enableSandbox skipped only for dev runs with --no-sandbox; packaged always sandboxed) |
