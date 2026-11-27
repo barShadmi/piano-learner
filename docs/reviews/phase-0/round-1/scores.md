@@ -1,0 +1,9 @@
+# Phase 0 · round 1 scores
+| Reviewer | Score | Blocking |
+| --- | --- | --- |
+| code | 8 | 0 |
+| design | 6 | 3 |
+| student | 6 | 2 |
+| words | 6 | 2 |
+| accessibility | 8 | 1 |
+| security | 7 | 0 |
