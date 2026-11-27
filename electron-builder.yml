@@ -6,6 +6,11 @@ directories:
 files:
   - out/**
   - package.json
+extraResources:
+  - from: native/audio-engine
+    to: native
+    filter:
+      - '*.node'
 win:
   target:
     - target: nsis

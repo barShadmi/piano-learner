@@ -23,10 +23,25 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/audio-engine
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      # Never --all-features: the test-only `noop` feature switches the real addon code off.
+      - run: cargo test
+        working-directory: native/audio-engine
+      - run: cargo clippy -- -D warnings
+        working-directory: native/audio-engine
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: native/audio-engine
+      # test:e2e runs `npm run build`, which builds the sound engine first.
       - run: xvfb-run -a npm run test:e2e
 
   windows-installer:
@@ -40,8 +55,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/audio-engine
       - run: npm ci
+      # dist:win builds the sound engine with ASIO. asio-sys needs LLVM (libclang) for bindgen.
       - run: npm run dist:win
+        env:
+          LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'
+      - name: Check the installer holds the sound engine
+        shell: bash
+        run: |
+          ls -l release/win-unpacked/resources/native/
+          test -f release/win-unpacked/resources/native/audio-engine.win32-x64-msvc.node
       - uses: actions/upload-artifact@v4
         with:
           name: PianoLearner-Setup

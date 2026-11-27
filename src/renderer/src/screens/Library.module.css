@@ -29,6 +29,12 @@
   text-align: center;
 }
 
+.actions {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
 .action {
   display: flex;
   flex-direction: column;

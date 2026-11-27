@@ -6,7 +6,9 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "npm run typecheck && electron-vite build",
+    "build:native": "npm --prefix native/audio-engine ci && npm --prefix native/audio-engine run build",
+    "build:native:asio": "npm --prefix native/audio-engine ci && npm --prefix native/audio-engine run build -- --features asio",
+    "build": "npm run build:native && npm run typecheck && electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
     "start": "electron-vite preview",
@@ -14,7 +16,7 @@
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test --trace off",
     "screens": "npm run build && tsx scripts/screens.ts",
-    "dist:win": "npm run build && electron-builder --win nsis --publish never"
+    "dist:win": "npm run build:native:asio && npm run typecheck && electron-vite build && electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "react": "19.3.1",
