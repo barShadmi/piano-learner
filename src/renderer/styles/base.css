@@ -34,13 +34,6 @@ button {
   border-color: var(--border-strong);
 }
 
-/* The button of the mode that is on. Also in aria-pressed; the dot before the word is the shape signal. */
-.button[aria-pressed='true'] {
-  background: var(--surface-raised);
-  color: var(--text);
-  border-color: var(--text);
-}
-
 a.button {
   box-sizing: border-box;
   display: inline-flex;

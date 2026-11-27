@@ -11,7 +11,7 @@ import { mergeLit } from '../keyboard/lit'
 import { applyEvents, keysDownLine, type KeysState } from '../keyboard/keysDown'
 import Keyboard from '../keyboard/Keyboard'
 import styles from './Play.module.css'
-import { engineStart, leadInEnd, playView, type Activity } from './playState'
+import { engineStart, leadInEnd, playView, soundIsRunning, SOUND_OFF, type Activity, type Mode } from './playState'
 import { pianoLine } from './soundText'
 
 // Nothing is down and the pedal is up. One object, so setting it again changes nothing.
@@ -55,10 +55,14 @@ export default function Play({ songId }: { songId?: string }) {
   return (
     <main className={styles.screen}>
       <div className={styles.header}>
-        <h1 className={styles.title} id="play-title">
+        <h1
+          className={styles.title}
+          id="play-title"
+          title={loaded.kind === 'ready' ? loaded.song.title : undefined}
+        >
           {loaded.kind === 'ready' ? loaded.song.title : 'Play'}
         </h1>
-        <a href="#/" className="button">
+        <a href="#/" className={`button ${styles.back}`}>
           Back to your songs
         </a>
       </div>
@@ -77,13 +81,14 @@ export default function Play({ songId }: { songId?: string }) {
   )
 }
 
-// A dot before the word of the button that is on. The pressed state is also in aria-pressed.
+// A dot before the word of the button that is on. It always takes its space, so the buttons never move.
+// The pressed state is also in aria-pressed.
 function Dot({ on }: { on: boolean }) {
-  return on ? (
-    <span aria-hidden="true" className={styles.glyph}>
+  return (
+    <span aria-hidden="true" className={styles.glyph} style={on ? undefined : { visibility: 'hidden' }}>
       ●
     </span>
-  ) : null
+  )
 }
 
 // One song on the Play screen: the piano status, the song controls, the falling notes and the keyboard.
@@ -110,6 +115,8 @@ function PlaySong({ song }: { song: Song }) {
   // `leadInTimer` starts the engine song when the lead-in (before time 0) ends.
   const [activity, setActivity] = useState<Activity>('idle')
   const listening = activity === 'listen'
+  // The mode that ran last, so a paused song keeps its button looking on.
+  const [mode, setMode] = useState<Mode | undefined>(undefined)
   // Plain reason when the engine could not play the song. The notes keep falling.
   const [heard, setHeard] = useState<string | undefined>(undefined)
   const session = useRef(0)
@@ -139,7 +146,9 @@ function PlaySong({ song }: { song: Song }) {
     clearTimeout(leadInTimer.current)
     leadInTimer.current = undefined
     setHeard(undefined)
-    setActivity('listen')
+    setMode('listen')
+    // Until the engine answers, Listen is pressed and the status says the sound is starting.
+    setActivity('starting')
 
     let fromS = clock.nowSeconds()
     if (fromS >= endS) {
@@ -154,6 +163,7 @@ function PlaySong({ song }: { song: Song }) {
         setHeard(undefined)
       } else {
         setActivity('watch')
+        setMode('watch')
         setHeard(reply.error)
       }
       clock.play(1)
@@ -163,21 +173,42 @@ function PlaySong({ song }: { song: Song }) {
         answer({ ok: false, error: 'The song could not start.' })
       )
     }
-
-    const begin = engineStart(fromS)
-    if (begin.kind === 'wait') {
-      // In the lead-in the clock starts now, and the engine starts when the clock reaches 0.
-      clock.play(1)
-      leadInTimer.current = setTimeout(() => {
-        leadInTimer.current = undefined
-        if (mine !== session.current) return
-        const first = leadInEnd()
-        clock.seek(first.seekS)
-        send(first.fromMs)
-      }, begin.waitMs)
-    } else {
-      send(begin.fromMs)
+    const begin = (): void => {
+      const start = engineStart(fromS)
+      if (start.kind === 'wait') {
+        // In the lead-in the clock starts now, and the engine starts when the clock reaches 0.
+        clock.play(1)
+        leadInTimer.current = setTimeout(() => {
+          leadInTimer.current = undefined
+          if (mine !== session.current) return
+          const first = leadInEnd()
+          clock.seek(first.seekS)
+          send(first.fromMs)
+        }, start.waitMs)
+      } else {
+        send(start.fromMs)
+      }
     }
+
+    // Ask the engine first. When the sound is off, go straight to the reason: no "Playing with sound." flash.
+    window.pianoLearner.audio.state().then(
+      (state) => {
+        if (mine !== session.current) return
+        if (!soundIsRunning(state)) {
+          setActivity('watch')
+          setMode('watch')
+          setHeard(SOUND_OFF)
+          clock.play(1)
+          return
+        }
+        setActivity('listen')
+        begin()
+      },
+      () => {
+        if (mine !== session.current) return
+        answer({ ok: false, error: 'The song could not start.' })
+      }
+    )
   }, [activity, clock, endS, startS, songEvents])
 
   const watch = useCallback(() => {
@@ -185,11 +216,12 @@ function PlaySong({ song }: { song: Song }) {
     // Watch only: this always silences a Listen that is on or waiting to begin. The notes keep moving.
     stopListening()
     setActivity('watch')
+    setMode('watch')
     // After the end, Watch begins again from the lead-in.
     if (clock.nowSeconds() >= endS) clock.seek(startS)
     clock.play(1)
   }, [activity, heard, clock, startS, endS, stopListening])
-  const view = playView({ activity, reason: heard })
+  const view = playView({ activity, reason: heard, mode })
   const pause = useCallback(() => {
     if (view.pauseDisabled) return
     clock.pause()
@@ -271,7 +303,7 @@ function PlaySong({ song }: { song: Song }) {
       <div className={styles.songStrip}>
         <button
           type="button"
-          className="button"
+          className={view.listenClass}
           aria-pressed={view.listenPressed}
           aria-describedby="play-hint"
           onClick={listen}
@@ -281,7 +313,7 @@ function PlaySong({ song }: { song: Song }) {
         </button>
         <button
           type="button"
-          className="button button-secondary"
+          className={view.watchClass}
           aria-pressed={view.watchPressed}
           aria-describedby="play-hint"
           onClick={watch}

@@ -319,7 +319,7 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     },
 
     testTone(args: ToneArgs): TestToneReply {
-      if (!engine || current.phase !== 'on') return { ok: false, error: 'Sound is not on yet.' }
+      if (!engine || current.phase !== 'on') return { ok: false, error: 'Sound is off. Press Open Sound to turn it on.' }
       try {
         engine.playTestTone(args.frequencyHz, args.seconds)
         return { ok: true }
@@ -396,7 +396,7 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     // Listen mode. The engine plays the song; these only start it, stop it and read where it is.
     // The events were checked in the main process before they got here.
     playSong(events: SongEvent[], fromMs: number): SongReply {
-      if (!engine || current.phase !== 'on') return { ok: false, error: 'Sound is not on yet.' }
+      if (!engine || current.phase !== 'on') return { ok: false, error: 'Sound is off. Press Open Sound to turn it on.' }
       if (typeof engine.playSong !== 'function') return { ok: false, error: songMissing }
       try {
         engine.playSong(events, fromMs)

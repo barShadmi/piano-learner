@@ -281,7 +281,7 @@ test('Listen asks for the song to be heard; with no sound it says why and the fa
 
     // This container has no sound card, so the engine is not on and the song cannot be heard.
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })).toBeVisible({
       timeout: 10_000
     })
     await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveAttribute('href', '#/sound')
@@ -311,14 +311,15 @@ test('Watch during Listen silences it: a waiting start is cancelled and no sound
     await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
+    // This container has no sound card, so the engine is off. Watch right after Listen cancels the pending
+    // start, so the engine's answer is ignored and no sound message stays.
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Playing with sound.' })).toBeVisible()
     await window.getByRole('button', { name: 'Watch (no sound)' }).click()
 
-    // Waiting past the lead-in: the cancelled start never reaches the engine, so nothing is reported.
+    // It never says "Playing with sound." (the sound is off), and nothing is reported after Watch.
     await expect(window.getByRole('status').filter({ hasText: 'Playing with sound.' })).toHaveCount(0)
     await window.waitForTimeout(3000)
-    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })).toHaveCount(0)
     await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveCount(0)
   } finally {
     await app.close()
@@ -335,11 +336,11 @@ test('Watch clears the sound message that Listen showed', async () => {
     await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })).toBeVisible({
       timeout: 10_000
     })
     await window.getByRole('button', { name: 'Watch (no sound)' }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })).toHaveCount(0)
     await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveCount(0)
   } finally {
     await app.close()
@@ -551,17 +552,40 @@ test('a song that is not in the library says so on Play, with a way back', async
   }
 })
 
+// A title of about 150 characters, for the smallest-window test.
+const LONG_TITLE =
+  'A very long song title that goes on and on to see that the heading is cut to one line with an ellipsis and the falling notes keep their room on a small window'
+
 test('at the smallest window the falling notes area is at least 240 px tall', async () => {
-  const app = await launch()
+  const fixtures = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-fixture-'))
+  const midi = new Midi()
+  const track = midi.addTrack()
+  track.name = LONG_TITLE
+  track.addNote({ midi: 60, time: 0, duration: 1 })
+  const midiFile = path.join(fixtures, 'long.mid')
+  fs.writeFileSync(midiFile, Buffer.from(midi.toArray()))
+  const app = await launch(undefined, { PIANO_LEARNER_E2E: '1', PIANO_LEARNER_E2E_IMPORT: midiFile })
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0].setContentSize(1024, 640)
     })
-    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
+    await window.getByRole('button', { name: 'Import file' }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Added' })).toBeVisible({ timeout: 20_000 })
+    await window.getByRole('link', { name: `Play ${LONG_TITLE}`, exact: true }).click()
     await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
     await window.waitForTimeout(500)
+    // The long title is cut to 1 line, the full title is in the title attribute, the back link stays on one line.
+    const heading = window.getByRole('heading', { level: 1 })
+    await expect(heading).toHaveAttribute('title', LONG_TITLE)
+    const lines = await heading.evaluate((el) => {
+      const lh = parseFloat(getComputedStyle(el).lineHeight)
+      return Math.round(el.getBoundingClientRect().height / lh)
+    })
+    expect(lines).toBeLessThanOrEqual(1)
+    const back = await window.getByRole('link', { name: 'Back to your songs' }).boundingBox()
+    expect(back!.height).toBeLessThan(80)
     const area = (): Promise<number> =>
       window.locator('[data-frames]').evaluate((el) => el.getBoundingClientRect().height)
     const idle = await area()
@@ -573,14 +597,16 @@ test('at the smallest window the falling notes area is at least 240 px tall', as
     // A long engine message (69 characters) still fits on its one row.
     await window
       .getByRole('status')
-      .filter({ hasText: 'Sound is not on yet.' })
+      .filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })
       .evaluate((el) => {
         el.textContent = 'Your saved sound output was not found, so the default output is used.'
       })
     expect(await area()).toBe(idle)
     // The hint stays visible.
     await expect(window.getByText('Listen plays the song with sound. Watch shows the notes only.')).toBeVisible()
+    console.log(`falling area with long title: idle ${idle}`)
   } finally {
     await app.close()
+    fs.rmSync(fixtures, { recursive: true, force: true })
   }
 })

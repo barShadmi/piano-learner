@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { engineStart, leadInEnd, playView } from './playState'
+import { engineStart, leadInEnd, playView, soundIsRunning, SOUND_OFF } from './playState'
 
 describe('engineStart', () => {
   it('waits for the rest of the lead-in when the clock is before 0', () => {
@@ -54,10 +54,66 @@ describe('playView', () => {
     expect(v.pauseDisabled).toBe(true)
   })
   it('shows the engine reason with the Sound link while the notes fall without sound', () => {
-    const v = playView({ activity: 'watch', reason: 'Sound is not on yet.' })
-    expect(v.status).toBe('Sound is not on yet.')
+    const v = playView({ activity: 'watch', reason: SOUND_OFF })
+    expect(v.status).toBe(SOUND_OFF)
     expect(v.soundLink).toBe(true)
     expect(v.watchPressed).toBe(true)
     expect(v.pauseDisabled).toBe(false)
+  })
+})
+
+describe('soundIsRunning', () => {
+  it('is true only when the engine phase is on', () => {
+    expect(soundIsRunning({ phase: 'on' })).toBe(true)
+    expect(soundIsRunning({ phase: 'off' })).toBe(false)
+    expect(soundIsRunning({ phase: 'starting' })).toBe(false)
+    expect(soundIsRunning({ phase: 'failed' })).toBe(false)
+  })
+  it('says how to turn the sound on', () => {
+    expect(SOUND_OFF).toBe('Sound is off. Press Open Sound to turn it on.')
+  })
+})
+
+describe('playView while waiting for the engine', () => {
+  it('shows Starting the sound with Listen as the mode that is on, and no Sound link', () => {
+    const v = playView({ activity: 'starting' })
+    expect(v.status).toBe('Starting the sound…')
+    expect(v.listenPressed).toBe(true)
+    expect(v.soundLink).toBe(false)
+    expect(v.pauseDisabled).toBe(true)
+  })
+})
+
+describe('playView button looks', () => {
+  it('before any press: Listen is primary, Watch secondary', () => {
+    const v = playView({ activity: 'idle' })
+    expect(v.listenClass).toBe('button')
+    expect(v.watchClass).toBe('button button-secondary')
+  })
+  it('while Listen runs: Listen primary, Watch secondary', () => {
+    const v = playView({ activity: 'listen' })
+    expect(v.listenClass).toBe('button')
+    expect(v.watchClass).toBe('button button-secondary')
+  })
+  it('while Watch runs: Watch primary, Listen secondary', () => {
+    const v = playView({ activity: 'watch' })
+    expect(v.watchClass).toBe('button')
+    expect(v.listenClass).toBe('button button-secondary')
+  })
+  it('when paused, the mode that was running stays primary and pressed', () => {
+    const w = playView({ activity: 'paused', mode: 'watch' })
+    expect(w.watchPressed).toBe(true)
+    expect(w.watchClass).toBe('button')
+    expect(w.listenClass).toBe('button button-secondary')
+    const l = playView({ activity: 'paused', mode: 'listen' })
+    expect(l.listenPressed).toBe(true)
+    expect(l.listenClass).toBe('button')
+    expect(l.watchClass).toBe('button button-secondary')
+    expect(l.pauseDisabled).toBe(true)
+  })
+  it('after a restart (idle) nothing is pressed even if a mode ran before', () => {
+    const v = playView({ activity: 'idle', mode: 'watch' })
+    expect(v.watchPressed).toBe(false)
+    expect(v.listenClass).toBe('button')
   })
 })

@@ -177,12 +177,17 @@ export default function Latency() {
 
         {problem ? <p className={styles.reason}>{problem}</p> : null}
 
+        {/* Always there, empty until 20 keys, so the result is read out once when it appears. */}
+        <p className={styles.visuallyHidden} role="status">
+          {summary && words ? `${resultLine(summary.medianMs)} ${words.text}` : ''}
+        </p>
+
         {summary && words ? (
           <>
-            <p className={styles.big} role="status">
+            <p className={styles.big}>
               {resultLine(summary.medianMs)}
             </p>
-            <p className={`${styles.verdict} ${styles[verdict(summary)]}`} role="status">
+            <p className={`${styles.verdict} ${styles[verdict(summary)]}`}>
               <span aria-hidden="true" className={styles.glyph}>
                 {words.glyph}
               </span>
