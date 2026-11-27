@@ -14,3 +14,10 @@
 - Words: three import errors still lack a next step ("could not be read as MIDI/MusicXML", "could not be opened", "could not be imported"); "Piano Learner" in the MIDI client name.
 - Falling notes: the edge stripe is thin at 1x (reads as a notch); "R" on an 11 px black-key note has no side margin.
 - Delay test: a poll that jumps past a multiple of 5 skips that announcement; cpal "measured" wording when nothing was measured.
+
+## From round 2 (not fixed in phase 1)
+- Code: a Play component test with fake timers that would catch the first-note bug coming back (leadInEnd's test cannot fail); "Show report" can open an older report if more keys are timed after saving; Windows-only test that RealClock picks the 500 µs spin.
+- Performance: getSong still reads a whole song synchronously on the main thread (make it async); chooseLabel makes two small arrays per restyle; plus round 1 items above.
+- Design: Back links and the extra buttons on Sound and Delay test should be `.button-secondary` (one primary per screen); legend as two hand chips holding R / L at `--text-md`; the `--on-accent` bar on a lit white key in light theme reads as a shorter key (use an inset rounded mark); an idle line in the Play status row ("Press Listen to hear the song.").
+- Student: "Restart song" parks at the start instead of playing again (rename or restart in the running mode); importing the same file twice gives two identical rows.
+- Words: Sound status line mixes buffer and sound card ms; sample rate on the Delay screen; `latency-report.*` file names vs "Delay"; "close" verdict ends without a judgement word; native reasons: exclusive turned off in Windows (use the Mode name, and don't advise closing apps), buffer refused (no next step), "no output port"/"output port is busy" jargon, piano sound file errors show paths; "No piano found." on Play with no next step; "Your songs could not be read." with no next step.
