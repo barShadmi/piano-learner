@@ -33,3 +33,6 @@ Acceptance:
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder (Haiku) | 1 | PASS (lead added color-scheme per verifier polish note) |
+
+Note for phase 1 keyboard task: in dark theme the hand and feedback colours are low contrast on `--key-white`; lit white keys need their own tokens.

@@ -3,6 +3,15 @@ import { join } from 'node:path'
 
 const rendererUrl = process.env['ELECTRON_RENDERER_URL']
 
+// Used by the screenshot script. Empty means the normal start page.
+const rawScreen = process.env['PIANO_SCREEN'] ?? ''
+const screenHash = /^[a-z0-9/-]*$/.test(rawScreen) ? rawScreen : ''
+
+// Only 'light' or 'dark' force a theme. Anything else is ignored.
+const forcedTheme = process.env['PIANO_THEME'] === 'light' || process.env['PIANO_THEME'] === 'dark'
+  ? process.env['PIANO_THEME']
+  : undefined
+
 // Only the app's own pages may load in the window. Anything else is refused.
 function isAppUrl(url: string): boolean {
   try {
@@ -25,7 +34,8 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      additionalArguments: forcedTheme ? [`--piano-theme=${forcedTheme}`] : []
     }
   })
 
@@ -37,9 +47,11 @@ function createWindow(): void {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   if (rendererUrl) {
-    void win.loadURL(rendererUrl)
+    void win.loadURL(screenHash ? `${rendererUrl}#/${screenHash}` : rendererUrl)
   } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'))
+    void win.loadFile(join(__dirname, '../renderer/index.html'), {
+      hash: screenHash ? `/${screenHash}` : undefined
+    })
   }
 }
 
