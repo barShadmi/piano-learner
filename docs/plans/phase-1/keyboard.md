@@ -27,3 +27,4 @@ Acceptance: npm test, lint, typecheck, build, e2e pass; screenshots light and da
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder (Haiku) | 1 | PASS. allOff keeps the pedal (MIDI CC 123 does not release sustain). |
