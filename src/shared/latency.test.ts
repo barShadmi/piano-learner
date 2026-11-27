@@ -6,7 +6,6 @@ import {
   progressAnnouncement,
   soundCardLine,
   soundIsOff,
-  outputWords,
   reportJson,
   reportText,
   resultLine,
@@ -33,7 +32,12 @@ const now = new Date('2026-11-27T13:50:00.000Z')
 
 describe('verdict', () => {
   it('is good when the slowest of most keys is under 10 ms', () => {
-    expect(verdict({ ...base, p95Ms: 9.99 })).toBe('good')
+    expect(verdict({ ...base, p95Ms: 9.94 })).toBe('good')
+  })
+
+  // The verdict is judged on the numbers as shown (one decimal), so it never disagrees with them.
+  it('judges the 95th percentile as shown: 9.96 shows as 10.0, so it is close', () => {
+    expect(verdict({ ...base, p95Ms: 9.96 })).toBe('close')
   })
 
   it('is close from 10 ms up to and including 15 ms', () => {
@@ -41,8 +45,12 @@ describe('verdict', () => {
     expect(verdict({ ...base, p95Ms: 15 })).toBe('close')
   })
 
-  it('is slow above 15 ms', () => {
-    expect(verdict({ ...base, p95Ms: 15.01 })).toBe('slow')
+  it('is close at 15.04, which shows as 15.0', () => {
+    expect(verdict({ ...base, p95Ms: 15.04 })).toBe('close')
+  })
+
+  it('is slow when the shown figure is over 15 ms', () => {
+    expect(verdict({ ...base, p95Ms: 15.06 })).toBe('slow')
   })
 
   it('judges by the 95th percentile, not the median', () => {
@@ -52,24 +60,16 @@ describe('verdict', () => {
 
 describe('verdictWords', () => {
   it('says almost every key is under 10 ms, with a tick and no tips, when good', () => {
-    expect(verdictWords('good')).toEqual({
+    expect(verdictWords('good', 4.2)).toEqual({
       glyph: '✓',
       text: 'Almost every key sounds in under 10 ms. Good.',
       tips: []
     })
   })
 
-  it('says most keys are fast but some take over 10 ms, when close', () => {
-    expect(verdictWords('close').text).toBe('Most keys are fast, but some take over 10 ms.')
-  })
-
-  it('says some keys take over 15 ms, when slow', () => {
-    expect(verdictWords('slow').text).toBe('Some keys take over 15 ms. Too slow.')
-  })
-
   it('gives the two things to try when close or slow, using the Sound screen names', () => {
     for (const level of ['close', 'slow'] as const) {
-      expect(verdictWords(level).tips).toEqual([
+      expect(verdictWords(level, 4.2).tips).toEqual([
         'On the Sound screen, set Mode to Fastest (exclusive) or ASIO driver.',
         'Pick a smaller Buffer on the Sound screen.'
       ])
@@ -77,9 +77,41 @@ describe('verdictWords', () => {
   })
 
   it('uses a different symbol for close and slow, so colour is not the only signal', () => {
-    expect(verdictWords('close').glyph).toBe('▲')
-    expect(verdictWords('slow').glyph).toBe('✗')
+    expect(verdictWords('close', 4.2).glyph).toBe('▲')
+    expect(verdictWords('slow', 4.2).glyph).toBe('✗')
   })
+})
+
+// Each row: the typical key (median) and the slowest of most keys (95th percentile) as the
+// screen shows them, with the verdict and words expected for them.
+const verdictTable = [
+  { median: 4.2, p95: 9.94, level: 'good', text: 'Almost every key sounds in under 10 ms. Good.' },
+  { median: 4.2, p95: 9.96, level: 'close', text: 'Most keys sound in under 10 ms, but some take 10 ms or more.' },
+  { median: 4.2, p95: 10.0, level: 'close', text: 'Most keys sound in under 10 ms, but some take 10 ms or more.' },
+  { median: 4.2, p95: 15.0, level: 'close', text: 'Most keys sound in under 10 ms, but some take 10 ms or more.' },
+  { median: 4.2, p95: 15.04, level: 'close', text: 'Most keys sound in under 10 ms, but some take 10 ms or more.' },
+  { median: 4.2, p95: 15.06, level: 'slow', text: 'Most keys are fast, but some take over 15 ms. Too slow.' },
+  { median: 9.96, p95: 9.96, level: 'close', text: 'Most keys take 10 to 15 ms. Close, but a little slow.' },
+  { median: 10.0, p95: 13, level: 'close', text: 'Most keys take 10 to 15 ms. Close, but a little slow.' },
+  { median: 12, p95: 13, level: 'close', text: 'Most keys take 10 to 15 ms. Close, but a little slow.' },
+  { median: 12, p95: 15.04, level: 'close', text: 'Most keys take 10 to 15 ms. Close, but a little slow.' },
+  { median: 12, p95: 16, level: 'slow', text: 'Most keys take over 10 ms, and some over 15 ms. Too slow.' }
+] as const
+
+describe('verdict words agree with the typical key shown', () => {
+  for (const row of verdictTable) {
+    it(`median ${row.median} and 95th ${row.p95} give ${row.level}`, () => {
+      const summary = { ...base, medianMs: row.median, p95Ms: row.p95 }
+      expect(verdict(summary)).toBe(row.level)
+      const words = verdictWords(verdict(summary), row.median)
+      expect(words.text).toBe(row.text)
+      // The words say "under 10 ms" for a typical key that shows under 10.0, and not otherwise.
+      const typicalShown = Number(row.median.toFixed(1))
+      const saysUnder10 = words.text.includes('under 10 ms') || words.text.startsWith('Most keys are fast')
+      expect(saysUnder10).toBe(typicalShown < 10)
+      expect(resultLine(row.median)).toBe(`Typical key: about ${row.median.toFixed(1)} ms.`)
+    })
+  }
 })
 
 describe('resultLine', () => {
@@ -104,20 +136,11 @@ describe('timingRows', () => {
 describe('setupRows', () => {
   it('says how sound is set up in plain words', () => {
     expect(setupRows(base)).toEqual([
-      { label: 'Mode', value: 'exclusive mode' },
+      { label: 'Mode', value: 'Fastest (exclusive)' },
       { label: 'Buffer', value: '128 samples' },
       { label: 'Sample rate', value: '48000 Hz' },
       { label: 'Sound gaps', value: '0' }
     ])
-  })
-})
-
-describe('outputWords', () => {
-  it('names each way of playing sound, and says when none is running', () => {
-    expect(outputWords('wasapi-shared')).toBe('shared mode')
-    expect(outputWords('asio')).toBe('ASIO')
-    expect(outputWords('cpal')).toBe('standard mode')
-    expect(outputWords('')).toBe('Not running')
   })
 })
 
@@ -127,7 +150,7 @@ describe('reportText', () => {
     expect(text).toContain('Typical key: about 4.2 ms.')
     expect(text).toContain('Almost every key sounds in under 10 ms. Good.')
     expect(text).toContain('Typical key: 4.2 ms')
-    expect(text).toContain('Mode: exclusive mode')
+    expect(text).toContain('Mode: Fastest (exclusive)')
   })
 
   it('says the sound driver reported the sound card figure for WASAPI modes', () => {

@@ -123,7 +123,7 @@ export default function Latency() {
   const full = summary !== undefined && count >= KEYS_NEEDED
   // The piano is there but no sound output runs, so no key can be timed.
   const soundOff = connected && summary !== undefined && soundIsOff(summary)
-  const words = full ? verdictWords(verdict(summary)) : undefined
+  const words = full ? verdictWords(verdict(summary), summary.medianMs) : undefined
 
   return (
     <main className={styles.screen}>

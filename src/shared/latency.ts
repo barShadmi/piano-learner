@@ -1,5 +1,6 @@
 // The delay test: plain numbers, the verdict and the report text. Pure: no sound, no files.
 // The native engine reports the numbers; this file only turns them into words.
+import { modeWords } from './modes'
 
 // How many keys make a full result.
 export const KEYS_NEEDED = 20
@@ -22,10 +23,17 @@ export type LatencySummary = {
 
 export type LatencyVerdict = 'good' | 'close' | 'slow'
 
+// A number as the screen shows it: one decimal place.
+export function shownMs(value: number): number {
+  return Number(value.toFixed(1))
+}
+
 // Good when the slowest of most keys is under 10 ms; close up to 15 ms; slow above.
+// Judged on the shown figure, so 9.96 (shown as 10.0) is close, never good.
 export function verdict(summary: LatencySummary): LatencyVerdict {
-  if (summary.p95Ms < 10) return 'good'
-  if (summary.p95Ms <= 15) return 'close'
+  const p95 = shownMs(summary.p95Ms)
+  if (p95 < 10) return 'good'
+  if (p95 <= 15) return 'close'
   return 'slow'
 }
 
@@ -38,19 +46,29 @@ const tryThese = [
 ]
 
 // A symbol and words for each verdict, so colour is never the only signal.
-// The words name what the verdict judges: the slowest of most keys (95 in 100).
-export function verdictWords(level: LatencyVerdict): VerdictWords {
+// The words name what the verdict judges (the slowest of most keys, 95 in 100) and agree with
+// the typical key on screen: they say "under 10 ms" only when that shows under 10.0.
+export function verdictWords(level: LatencyVerdict, medianMs: number): VerdictWords {
+  const typicalUnder10 = shownMs(medianMs) < 10
   switch (level) {
     case 'good':
       return { glyph: '✓', text: 'Almost every key sounds in under 10 ms. Good.', tips: [] }
     case 'close':
       return {
         glyph: '▲',
-        text: 'Most keys are fast, but some take over 10 ms.',
+        text: typicalUnder10
+          ? 'Most keys sound in under 10 ms, but some take 10 ms or more.'
+          : 'Most keys take 10 to 15 ms. Close, but a little slow.',
         tips: tryThese
       }
     case 'slow':
-      return { glyph: '✗', text: 'Some keys take over 15 ms. Too slow.', tips: tryThese }
+      return {
+        glyph: '✗',
+        text: typicalUnder10
+          ? 'Most keys are fast, but some take over 15 ms. Too slow.'
+          : 'Most keys take over 10 ms, and some over 15 ms. Too slow.',
+        tips: tryThese
+      }
   }
 }
 
@@ -90,22 +108,6 @@ export function soundIsOff(summary: LatencySummary): boolean {
   return summary.backend === ''
 }
 
-// The way sound is played, in words. Same words as the Sound screen.
-export function outputWords(backend: string): string {
-  switch (backend) {
-    case 'wasapi-exclusive':
-      return 'exclusive mode'
-    case 'wasapi-shared':
-      return 'shared mode'
-    case 'asio':
-      return 'ASIO'
-    case 'cpal':
-      return 'standard mode'
-    default:
-      return 'Not running'
-  }
-}
-
 export type Row = { label: string; value: string }
 
 const ms = (value: number): string => `${value.toFixed(1)} ms`
@@ -130,7 +132,7 @@ export function timingRows(summary: LatencySummary): Row[] {
 // How sound is set up. Shown always.
 export function setupRows(summary: LatencySummary): Row[] {
   return [
-    { label: 'Mode', value: outputWords(summary.backend) },
+    { label: 'Mode', value: modeWords(summary.backend) },
     { label: 'Buffer', value: `${summary.bufferFrames} samples` },
     { label: 'Sample rate', value: `${summary.sampleRate} Hz` },
     { label: 'Sound gaps', value: String(summary.underruns) }
@@ -145,7 +147,7 @@ export function reportText(summary: LatencySummary, now: Date): string {
   } else if (summary.count < KEYS_NEEDED) {
     lines.push(`Only ${summary.count} of ${KEYS_NEEDED} keys timed so far.`)
   } else {
-    const words = verdictWords(verdict(summary))
+    const words = verdictWords(verdict(summary), summary.medianMs)
     lines.push(resultLine(summary.medianMs), words.text)
   }
   if (summary.count > 0) {

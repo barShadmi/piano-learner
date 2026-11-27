@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  backendWords,
   BUFFER_HINT,
   bufferLabel,
   fallbackLine,
@@ -9,7 +8,6 @@ import {
   LOCAL_CONTROL_TIP,
   localControlLine,
   modeChoices,
-  modeLabel,
   noteName,
   outputChoices,
   outputLabel,
@@ -21,16 +19,6 @@ import {
   statusLine
 } from './soundText'
 import type { OutputDevice } from '../../../shared/audio'
-
-describe('backendWords', () => {
-  it('uses plain words for each way of playing', () => {
-    expect(backendWords('wasapi-exclusive')).toBe('exclusive mode')
-    expect(backendWords('wasapi-shared')).toBe('shared mode')
-    expect(backendWords('asio')).toBe('ASIO')
-    expect(backendWords('cpal')).toBe('standard mode')
-    expect(backendWords('mystery')).toBe('mystery')
-  })
-})
 
 describe('statusLine', () => {
   it('says what is happening for each phase', () => {
@@ -52,7 +40,7 @@ describe('statusLine', () => {
           outputLatencyMs: 2.66
         }
       })
-    ).toBe('Sound is on. Headphones (Realtek), exclusive mode, 128 samples, about 2.7 ms.')
+    ).toBe('Sound is on. Headphones (Realtek), Fastest (exclusive), 128 samples, about 2.7 ms.')
   })
 
   it('does not claim a delay when it is not known', () => {
@@ -68,7 +56,7 @@ describe('statusLine', () => {
           outputLatencyMs: 0
         }
       })
-    ).toBe('Sound is on. Speakers, standard mode, 256 samples.')
+    ).toBe('Sound is on. Speakers, Standard mode, 256 samples.')
   })
 })
 
@@ -200,15 +188,15 @@ describe('localControlLine', () => {
 })
 
 describe('fallbackLine', () => {
-  it('says exclusive mode is busy and the app is on shared mode', () => {
+  it('says Fastest (exclusive) is busy and the app is on Shared with other apps', () => {
     expect(fallbackLine('wasapi-shared')).toBe(
-      'Exclusive mode is busy, so the app is using shared mode. Close other apps that use sound and press Try again.'
+      'Fastest (exclusive) is busy, so the app is using Shared with other apps. Close other apps that use sound and press Try again.'
     )
   })
 
   it('names the mode it fell back to when that is not shared mode', () => {
     expect(fallbackLine('cpal')).toBe(
-      'Exclusive mode did not work, so the app is using standard mode. Close other apps that use sound and press Try again.'
+      'Fastest (exclusive) did not work, so the app is using Standard mode. Close other apps that use sound and press Try again.'
     )
   })
 })
@@ -236,15 +224,6 @@ describe('outputLabel', () => {
 
   it('leaves other device names as they are', () => {
     expect(outputLabel('Speakers (Realtek)')).toBe('Speakers (Realtek)')
-  })
-})
-
-describe('modeLabel', () => {
-  it('uses the plain words for each mode', () => {
-    expect(modeLabel('wasapi-exclusive')).toBe('Fastest (exclusive)')
-    expect(modeLabel('wasapi-shared')).toBe('Shared with other apps')
-    expect(modeLabel('asio')).toBe('ASIO driver')
-    expect(modeLabel('cpal')).toBe('Standard mode')
   })
 })
 

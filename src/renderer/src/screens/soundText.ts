@@ -1,20 +1,5 @@
 import type { AudioState, Backend, MidiEvent, MidiStatusReply, OutputDevice, PianoSound } from '../../../shared/audio'
-
-// The way sound is played, in words a beginner can read.
-export function backendWords(backend: string): string {
-  switch (backend) {
-    case 'wasapi-exclusive':
-      return 'exclusive mode'
-    case 'wasapi-shared':
-      return 'shared mode'
-    case 'asio':
-      return 'ASIO'
-    case 'cpal':
-      return 'standard mode'
-    default:
-      return backend
-  }
-}
+import { modeWords } from '../../../shared/modes'
 
 // One short sentence about the sound, for the top of the Sound screen.
 export function statusLine(state: AudioState): string {
@@ -28,7 +13,7 @@ export function statusLine(state: AudioState): string {
     case 'on': {
       const r = state.result
       if (!r) return 'Sound is on.'
-      const parts = [r.deviceName, backendWords(r.backend), `${r.bufferFrames} samples`]
+      const parts = [r.deviceName, modeWords(r.backend), `${r.bufferFrames} samples`]
       if (r.outputLatencyMs > 0) parts.push(`about ${r.outputLatencyMs.toFixed(1)} ms`)
       return `Sound is on. ${parts.join(', ')}.`
     }
@@ -37,12 +22,13 @@ export function statusLine(state: AudioState): string {
 
 const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
 
-// The line under a sound that fell back to another mode. It names the mode the sound uses now.
+// The line under a sound that fell back to another mode. It names the mode the sound uses now,
+// with the same name as the Mode list.
 export function fallbackLine(backend: string): string {
   if (backend === 'wasapi-shared') {
-    return 'Exclusive mode is busy, so the app is using shared mode. Close other apps that use sound and press Try again.'
+    return 'Fastest (exclusive) is busy, so the app is using Shared with other apps. Close other apps that use sound and press Try again.'
   }
-  return `Exclusive mode did not work, so the app is using ${backendWords(backend)}. Close other apps that use sound and press Try again.`
+  return `Fastest (exclusive) did not work, so the app is using ${modeWords(backend)}. Close other apps that use sound and press Try again.`
 }
 
 // The name of a key, like C4 for middle C (MIDI 60). Anything that is not a MIDI note gives '?'.
@@ -119,20 +105,6 @@ export function localControlLine(reply: MidiStatusReply | undefined): string | u
 // The tip for when the sound is heard twice (the piano's speakers are still on).
 export const LOCAL_CONTROL_TIP =
   'If you hear the sound twice, hold METRONOME and RHYTHM on the piano and press the C5 key.'
-
-// The name of a sound mode in the Mode list, in plain words.
-export function modeLabel(backend: Backend): string {
-  switch (backend) {
-    case 'wasapi-exclusive':
-      return 'Fastest (exclusive)'
-    case 'wasapi-shared':
-      return 'Shared with other apps'
-    case 'asio':
-      return 'ASIO driver'
-    case 'cpal':
-      return 'Standard mode'
-  }
-}
 
 // The modes to offer, in a fixed order: only those the outputs list has, plus the saved one.
 const modeOrder: readonly Backend[] = ['wasapi-exclusive', 'wasapi-shared', 'asio', 'cpal']

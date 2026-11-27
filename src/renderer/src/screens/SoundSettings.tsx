@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { AudioState, Backend, OutputDevice } from '../../../shared/audio'
 import type { SettingsSetReply, SoundSettings as Settings } from '../../../shared/settings'
 import styles from './SoundSettings.module.css'
-import { BUFFER_HINT, bufferLabel, modeChoices, modeLabel, outputChoices, outputFamily } from './soundText'
+import { modeLabel } from '../../../shared/modes'
+import { BUFFER_HINT, bufferLabel, modeChoices, outputChoices, outputFamily } from './soundText'
 
 const bufferChoices = [64, 128, 256, 512] as const
 
