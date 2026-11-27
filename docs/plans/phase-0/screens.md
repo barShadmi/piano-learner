@@ -19,3 +19,4 @@ Acceptance:
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder (Haiku) | 1 | PASS (lead then limited PIANO_SCREEN to a-z0-9/-, typechecked scripts/, ignored screens-out) |

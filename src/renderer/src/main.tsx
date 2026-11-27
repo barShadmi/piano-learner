@@ -14,8 +14,11 @@ function readStoredTheme(): string | null {
   }
 }
 
+// A forced theme (set by the screenshot script) wins over stored and system.
+const forcedTheme = window.pianoLearner?.forcedTheme
 applyTheme(
-  getInitialTheme(readStoredTheme(), window.matchMedia('(prefers-color-scheme: dark)').matches)
+  forcedTheme ??
+    getInitialTheme(readStoredTheme(), window.matchMedia('(prefers-color-scheme: dark)').matches)
 )
 
 createRoot(document.getElementById('root')!).render(

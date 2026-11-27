@@ -8,7 +8,7 @@ Tags: (B) builder, (B+) builder-plus, (L) lead. `hard` steps go straight to buil
 - [x] Vitest and Playwright-for-Electron, one passing test each (B) [test-driven-development]
 - [ ] Internal song format: types, schema, sample song, validation (B) [test-driven-development]
 - [ ] GitHub Actions: lint, tests, Windows installer on every PR (B+)
-- [ ] Screenshot script for every app screen, light and dark (B)
+- [x] Screenshot script for every app screen, light and dark (B)
 - [x] Design tokens: hand colours, right/wrong colours, fonts, spacing, light and dark (B) [design-systems]
 
 ## Gate
