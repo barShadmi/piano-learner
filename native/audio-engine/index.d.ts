@@ -133,6 +133,15 @@ export interface PianoStatus {
   error?: string
 }
 
+/**
+ * Play a song through the sound engine, starting `from_ms` into it. A song
+ * that is already playing is replaced (its held notes are released first).
+ * Events may come in any order; they are played by time. Bad input (a note
+ * outside 21..108, a velocity outside 1..127, a time that is negative or not
+ * a number, more than 200000 events) throws and changes nothing.
+ */
+export declare function playSong(events: Array<SongEvent>, fromMs: number): void
+
 /** Play a short sine tone (440 Hz for 1 second unless told otherwise). */
 export declare function playTestTone(frequencyHz?: number | undefined | null, seconds?: number | undefined | null): void
 
@@ -150,6 +159,20 @@ export declare function setLocalControlOff(off: boolean): void
 
 /** Master volume from 0 to 1. */
 export declare function setVolume(volume: number): void
+
+export interface SongEvent {
+  /** When the note starts or ends, in milliseconds from the start of the song. */
+  timeMs: number
+  /** MIDI note number, 21..108. */
+  note: number
+  /** 1..127 (ignored for note-offs). */
+  velocity: number
+  /** True = key down, false = key up. */
+  on: boolean
+}
+
+/** Where the song is, in milliseconds, or null when no song is playing. */
+export declare function songPosition(): number | null
 
 /**
  * Open the sound output. Any output that is already open is closed first.
@@ -190,3 +213,6 @@ export declare function stop(): void
  * its ports and let go of the callback.
  */
 export declare function stopMidi(): void
+
+/** Stop the song and release the notes it holds. Fine when nothing plays. */
+export declare function stopSong(): void

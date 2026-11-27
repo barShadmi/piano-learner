@@ -1,4 +1,4 @@
-import type { Backend, StartConfig, ToneArgs } from '../shared/audio'
+import { MAX_SONG_EVENTS, MAX_SONG_TIME_MS, type Backend, type SongEvent, type SongPlayArgs, type StartConfig, type ToneArgs } from '../shared/audio'
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string }
 
@@ -74,4 +74,40 @@ export function parseToneArgs(input: unknown): Parsed<ToneArgs> {
     }
   }
   return { ok: true, value }
+}
+
+// A song for the engine to play: its events and where to start. The engine checks again, but a
+// bad request is refused here, in the main process, before it reaches the engine.
+export function parseSongPlay(input: unknown): Parsed<SongPlayArgs> {
+  if (!isPlainObject(input)) return { ok: false, error: 'The song was not valid.' }
+  for (const key of Object.keys(input)) {
+    if (key !== 'events' && key !== 'fromMs') return { ok: false, error: 'The song had something unexpected in it.' }
+  }
+  const { events, fromMs = 0 } = input
+  if (!isNumberIn(fromMs, 0, MAX_SONG_TIME_MS)) {
+    return { ok: false, error: 'The song start time must be 0 or more milliseconds (one day at most).' }
+  }
+  if (!Array.isArray(events)) return { ok: false, error: 'The song needs a list of notes.' }
+  if (events.length > MAX_SONG_EVENTS) {
+    return { ok: false, error: `A song can have at most ${MAX_SONG_EVENTS} events.` }
+  }
+  const checked: SongEvent[] = []
+  for (const raw of events as unknown[]) {
+    if (!isPlainObject(raw) || Object.keys(raw).length !== 4) {
+      return { ok: false, error: 'Every song event needs a time, a note, a velocity and on or off.' }
+    }
+    const { timeMs, note, velocity, on } = raw
+    if (!isNumberIn(timeMs, 0, MAX_SONG_TIME_MS)) {
+      return { ok: false, error: 'Every song event needs a time of 0 or more milliseconds (one day at most).' }
+    }
+    if (!isNumberIn(note, 21, 108) || !Number.isInteger(note)) {
+      return { ok: false, error: 'Every song note must be a whole piano key number, 21 to 108.' }
+    }
+    if (typeof on !== 'boolean') return { ok: false, error: 'Every song event must say if the note goes on or off.' }
+    if (!isNumberIn(velocity, on ? 1 : 0, 127) || !Number.isInteger(velocity)) {
+      return { ok: false, error: 'Every song velocity must be a whole number, 1 to 127 (0 is allowed for a note off).' }
+    }
+    checked.push({ timeMs, note, velocity, on })
+  }
+  return { ok: true, value: { events: checked, fromMs } }
 }

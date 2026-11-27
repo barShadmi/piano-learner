@@ -283,6 +283,7 @@ fn run_with_com(
     }
     let backend = if exclusive { "wasapi-exclusive" } else { "wasapi-shared" };
     let core = EngineCore::with_midi(inbox.commands, inbox.midi, Mixer::new(stream.sample_rate, stream.channels))
+        .with_song(inbox.song)
         .with_bank_link(inbox.banks);
     let info = StartInfo {
         backend: backend.to_string(),

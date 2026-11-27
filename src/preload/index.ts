@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { MidiEvent, StartConfig, ToneArgs } from '../shared/audio'
+import type { MidiEvent, SongEvent, StartConfig, ToneArgs } from '../shared/audio'
 import type { SoundSettings } from '../shared/settings'
 
 // The main process passes a forced theme as a command-line argument.
@@ -38,6 +38,13 @@ const midi = {
   }
 }
 
+// Listen mode. The native engine plays the song; the screens only start it, stop it and read where it is.
+const song = {
+  play: (events: SongEvent[], fromMs: number) => ipcRenderer.invoke('song:play', { events, fromMs }),
+  stop: () => ipcRenderer.invoke('song:stop'),
+  position: () => ipcRenderer.invoke('song:position')
+}
+
 // The delay test asks for the numbers, forgets them, and saves or shows the report. It never plays or times sound.
 const latency = {
   summary: () => ipcRenderer.invoke('latency:summary'),
@@ -46,13 +53,14 @@ const latency = {
   showFile: () => ipcRenderer.invoke('latency:open-folder')
 }
 
-// forcedTheme is added only when it is set, so a normal launch exposes just version, audio, latency, midi and settings.
+// forcedTheme is added only when it is set, so a normal launch exposes just version, audio, latency, midi, settings and song.
 const api = {
   version: '0.0.1',
   audio,
   latency,
   midi,
   settings,
+  song,
   ...(forcedTheme ? { forcedTheme } : {})
 }
 

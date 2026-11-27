@@ -6,7 +6,7 @@ import type { LatencySaveReply } from '../shared/latency'
 import type { VolumeReply } from '../shared/audio'
 import { checkSettings, type SettingsSetReply, type SoundSettings } from '../shared/settings'
 import type { AudioController } from './audioController'
-import { parseStartConfig, parseToneArgs, parseVolume } from './audioValidate'
+import { parseSongPlay, parseStartConfig, parseToneArgs, parseVolume } from './audioValidate'
 import { saveSettings } from './settingsStore'
 
 // Only the sound questions the Sound screen may ask. Each one checks its input,
@@ -37,6 +37,14 @@ export function registerAudioIpc(audio: AudioController, currentSettings: () => 
   // The piano questions: the status, and a reconnect. Key events go to the screen by sendMidiEvents.
   ipcMain.handle('midi:status', () => audio.midiStatus())
   ipcMain.handle('midi:reconnect', () => audio.reconnectMidi())
+  // Listen mode: the engine plays the song. The events are checked here before they reach the engine.
+  ipcMain.handle('song:play', (_event, input: unknown) => {
+    const parsed = parseSongPlay(input)
+    if (!parsed.ok) return parsed
+    return audio.playSong(parsed.value.events, parsed.value.fromMs)
+  })
+  ipcMain.handle('song:stop', () => audio.stopSong())
+  ipcMain.handle('song:position', () => audio.songPosition())
   registerLatencyIpc(audio)
 }
 
