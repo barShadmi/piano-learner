@@ -87,13 +87,17 @@ export function validateSong(value: unknown): ValidationResult {
       }
       if (m.index !== i) fail(`${path}.index`, `must be ${i}`)
 
-      const start = m.start
+      let start = m.start
       if (!isNum(start)) {
         fail(`${path}.start`, 'must be a number')
       } else if (i === 0 && start !== 0) {
         fail(`${path}.start`, 'must be 0')
+        // Carry on from 0, so only this measure is reported.
+        start = 0
       } else if (previousEnd !== undefined && start !== previousEnd) {
         fail(`${path}.start`, `must start where measure ${i - 1} ends (beat ${previousEnd})`)
+        // Carry on from where it should have started, so only this measure is reported.
+        start = previousEnd
       }
 
       const ts = m.timeSignature

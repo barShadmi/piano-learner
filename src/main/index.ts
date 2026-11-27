@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { isAppUrl } from './appUrl'
 
 // These three are for development and the screenshot script only.
 // A packaged app ignores them, so nobody can steer an installed app with them.
@@ -17,18 +18,7 @@ const forcedTheme = rawTheme === 'light' || rawTheme === 'dark' ? rawTheme : und
 const rendererFile = join(__dirname, '../renderer/index.html')
 const rendererFileUrl = pathToFileURL(rendererFile).href
 
-// Only the app's own page may load in a window. Anything else is refused.
-// The part after '#' is the app's own screen route, so it is ignored.
-function isAppUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    if (rendererUrl) return parsed.origin === new URL(rendererUrl).origin
-    parsed.hash = ''
-    return parsed.href === rendererFileUrl
-  } catch {
-    return false
-  }
-}
+const appUrlConfig = { rendererUrl, rendererFileUrl }
 
 let mainWindow: BrowserWindow | null = null
 
@@ -60,6 +50,22 @@ function createWindow(): void {
   const loading = rendererUrl
     ? win.loadURL(screenHash ? `${rendererUrl}#/${screenHash}` : rendererUrl)
     : win.loadFile(rendererFile, { hash: screenHash ? `/${screenHash}` : undefined })
+  // No menu means no zoom shortcuts, so handle them here. Key down only.
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.control) return
+    const wc = win.webContents
+    if (input.key === '=' || input.key === '+') {
+      wc.setZoomLevel(Math.min(3, wc.getZoomLevel() + 0.5))
+    } else if (input.key === '-') {
+      wc.setZoomLevel(Math.max(-1, wc.getZoomLevel() - 0.5))
+    } else if (input.key === '0') {
+      wc.setZoomLevel(0)
+    } else {
+      return
+    }
+    event.preventDefault()
+  })
+
   loading.catch((error: unknown) => {
     console.error('The app page could not load:', error)
     app.quit()
@@ -75,13 +81,18 @@ if (app.isPackaged || !process.argv.includes('--no-sandbox')) app.enableSandbox(
 // Guards for every web contents, present and future.
 app.on('web-contents-created', (_created, contents) => {
   contents.on('will-navigate', (event, url) => {
-    if (!isAppUrl(url)) event.preventDefault()
+    if (!isAppUrl(url, appUrlConfig)) event.preventDefault()
   })
   contents.on('will-redirect', (event, url) => {
-    if (!isAppUrl(url)) event.preventDefault()
+    if (!isAppUrl(url, appUrlConfig)) event.preventDefault()
   })
   // Deny every new window, including window.open.
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // Deny the Bluetooth device picker. The other pickers are session events (see whenReady).
+  contents.on('select-bluetooth-device', (event, _devices, callback) => {
+    event.preventDefault()
+    callback('')
+  })
   contents.on('will-attach-webview', (event) => {
     event.preventDefault()
   })
@@ -104,6 +115,19 @@ if (!app.requestSingleInstanceLock()) {
       ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
       ses.setPermissionCheckHandler(() => false)
       ses.setDevicePermissionHandler(() => false)
+      // Deny the serial, USB and HID pickers. Registered once, on the one session.
+      ses.on('select-serial-port', (event, _ports, _wc, callback) => {
+        event.preventDefault()
+        callback('')
+      })
+      ses.on('select-usb-device', (event, _details, callback) => {
+        event.preventDefault()
+        callback('')
+      })
+      ses.on('select-hid-device', (event, _details, callback) => {
+        event.preventDefault()
+        callback()
+      })
 
       if (app.isPackaged) Menu.setApplicationMenu(null)
       createWindow()

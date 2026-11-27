@@ -318,12 +318,18 @@ describe('validateSong step 2 checks', () => {
 })
 
 describe('validateSong measure continuity', () => {
+  it('reports only measure 0 when it does not start at 0', () => {
+    const song = freshSong()
+    measureAt(song, 0).start = 1
+    expect(errorsOf(song)).toEqual(['measures[0].start: must be 0'])
+  })
+
   it('rejects a measure that starts after the previous measure ends (a gap)', () => {
     const song = freshSong()
     // Measure 0 is 4 beats long, so measure 1 must start at beat 4. Beat 5 leaves a gap.
     measureAt(song, 1).start = 5
     const errors = errorsOf(song)
-    expect(errors).toContain('measures[1].start: must start where measure 0 ends (beat 4)')
+    expect(errors).toEqual(['measures[1].start: must start where measure 0 ends (beat 4)'])
   })
 
   it('rejects a measure that starts before the previous measure ends (an overlap)', () => {
@@ -331,7 +337,7 @@ describe('validateSong measure continuity', () => {
     // Measure 1 starts at beat 4 and is 4 beats long, so measure 2 must start at beat 8. Beat 6 overlaps.
     measureAt(song, 2).start = 6
     const errors = errorsOf(song)
-    expect(errors).toContain('measures[2].start: must start where measure 1 ends (beat 8)')
+    expect(errors).toEqual(['measures[2].start: must start where measure 1 ends (beat 8)'])
   })
 })
 
@@ -359,7 +365,7 @@ describe('validateSong accepts edge values', () => {
   })
 })
 
-describe('validateSong new rejections', () => {
+describe('validateSong rejects missing or empty parts', () => {
   it('rejects an empty song id', () => {
     const song = freshSong()
     song.id = ''

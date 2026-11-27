@@ -1,7 +1,8 @@
 /// <reference lib="dom" />
 // Saves a screenshot of every screen in light and dark at two window sizes.
 // Usage: npm run screens -- --out <folder>
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { _electron as electron } from '@playwright/test'
@@ -33,7 +34,8 @@ async function main(): Promise<void> {
         env['PIANO_SCREEN'] = screen.hash
         env['PIANO_THEME'] = theme
 
-        const app = await electron.launch({ args: ['.', '--no-sandbox'], cwd: root, env })
+        const userData = mkdtempSync(join(tmpdir(), 'pl-'))
+        const app = await electron.launch({ args: ['.', '--no-sandbox', `--user-data-dir=${userData}`], cwd: root, env })
         try {
           const page = await app.firstWindow()
           await app.evaluate(
@@ -55,6 +57,7 @@ async function main(): Promise<void> {
           written.push(file)
         } finally {
           await app.close()
+          rmSync(userData, { recursive: true, force: true })
         }
       }
     }
