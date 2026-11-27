@@ -94,15 +94,23 @@
   margin-right: var(--space-2);
 }
 
+/* The hint sits after the buttons and may wrap inside its own cell. */
+.hint {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
 /* The status line, with a way to the Sound screen when the engine gave a reason.
-   It keeps a fixed height, so the falling area never jumps when the words change. */
+   It has a row of its own with a minimum height of 44 px, so the words have room and the area below stays put. */
 .soundLine {
-  flex: 1 1 240px;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   min-height: 44px;
+  margin-top: var(--space-1);
 }
 
 .soundReason {

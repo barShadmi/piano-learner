@@ -562,8 +562,22 @@ test('at the smallest window the falling notes area is at least 240 px tall', as
     await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
     await window.waitForTimeout(500)
-    const height = await window.locator('[data-frames]').evaluate((el) => el.getBoundingClientRect().height)
-    expect(height).toBeGreaterThanOrEqual(240)
+    const area = (): Promise<number> =>
+      window.locator('[data-frames]').evaluate((el) => el.getBoundingClientRect().height)
+    const idle = await area()
+    expect(idle).toBeGreaterThanOrEqual(240)
+    // A failed Listen shows its reason and the Open Sound link: the area must not move.
+    await window.getByRole('button', { name: 'Listen', exact: true }).click()
+    await expect(window.getByRole('link', { name: 'Open Sound' })).toBeVisible({ timeout: 10_000 })
+    expect(await area()).toBe(idle)
+    // A long engine message (69 characters) still fits on its one row.
+    await window
+      .getByRole('status')
+      .filter({ hasText: 'Sound is not on yet.' })
+      .evaluate((el) => {
+        el.textContent = 'Your saved sound output was not found, so the default output is used.'
+      })
+    expect(await area()).toBe(idle)
     // The hint stays visible.
     await expect(window.getByText('Listen plays the song with sound. Watch shows the notes only.')).toBeVisible()
   } finally {

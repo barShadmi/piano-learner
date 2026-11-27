@@ -257,7 +257,7 @@ function PlaySong({ song }: { song: Song }) {
     <>
       <div className={styles.infoLine}>
         <p className={styles.compact}>
-          {connected ? 'Piano connected.' : pianoLine(piano)}
+          <span role="status">{connected ? 'Piano connected.' : pianoLine(piano)}</span>
           <span className={styles.sep} aria-hidden="true">
             ·
           </span>
@@ -266,7 +266,6 @@ function PlaySong({ song }: { song: Song }) {
           </span>
           {keys.pedal ? 'Pedal: down' : 'Pedal: up'}
         </p>
-        <p className={styles.compact}>Listen plays the song with sound. Watch shows the notes only.</p>
       </div>
 
       <div className={styles.songStrip}>
@@ -274,6 +273,7 @@ function PlaySong({ song }: { song: Song }) {
           type="button"
           className="button"
           aria-pressed={view.listenPressed}
+          aria-describedby="play-hint"
           onClick={listen}
         >
           <Dot on={view.listenPressed} />
@@ -283,6 +283,7 @@ function PlaySong({ song }: { song: Song }) {
           type="button"
           className="button button-secondary"
           aria-pressed={view.watchPressed}
+          aria-describedby="play-hint"
           onClick={watch}
         >
           <Dot on={view.watchPressed} />
@@ -299,16 +300,19 @@ function PlaySong({ song }: { song: Song }) {
         <button type="button" className="button button-secondary" onClick={backToStart}>
           Restart song
         </button>
-        <div className={styles.soundLine}>
-          <p className={styles.soundReason} role="status">
-            {view.status}
-          </p>
-          {view.soundLink ? (
-            <a href="#/sound" className="button button-secondary">
-              Open Sound
-            </a>
-          ) : null}
-        </div>
+        <p className={styles.hint} id="play-hint">
+          Listen plays the song with sound. Watch shows the notes only.
+        </p>
+      </div>
+      <div className={styles.soundLine}>
+        <p className={styles.soundReason} role="status">
+          {view.status}
+        </p>
+        {view.soundLink ? (
+          <a href="#/sound" className="button button-secondary">
+            Open Sound
+          </a>
+        ) : null}
       </div>
       {plan.cut ? (
         <p className={styles.compact}>Listen plays only the first part of this long song.</p>
