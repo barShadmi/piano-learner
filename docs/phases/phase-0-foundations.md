@@ -14,3 +14,4 @@ Tags: (B) builder, (B+) builder-plus, (L) lead. `hard` steps go straight to buil
 ## Gate
 - [x] Review board passed (no Blocking item left)
 - [ ] Bar: Install the .exe from a PR; the app opens and shows an empty song library
+- [ ] Bar: In the installed app, Ctrl + and Ctrl - change the text size and Ctrl 0 resets it; there is no menu bar
