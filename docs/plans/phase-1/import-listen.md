@@ -17,7 +17,7 @@ Tests first: hands, beats, tempo, chord, tie, backup, fingering, out-of-range pi
 Acceptance: npm test, lint, typecheck pass.
 
 ## Step 2 · Song library and import button (builder) [frontend-design]
-Files: `src/main/songStore.ts` + test (list, get, save with atomic write, ids safe for file names), `src/main/ipc.ts` (`songs:list`, `songs:get`, `songs:import` which opens the file dialog in main with the file filters above and returns the new song's summary or a plain error), `src/preload/*` (`pianoLearner.songs`), `src/renderer/src/routes.ts` + test (`#/play/<id>`), `Library.tsx` + css (enable "Import file", list songs, empty state wording updated), `Play.tsx` (load the song by id, else the sample), `e2e/app.spec.ts` (import a fixture MIDI by stubbing the dialog in main for tests through an env var read only when `PIANO_LEARNER_E2E=1`; the song shows in the list and opens on Play).
+Files: `src/main/songStore.ts` + test (list, get, save with atomic write, ids safe for file names), `src/main/ipc.ts` (`songs:list`, `songs:get`, `songs:import` which opens the file dialog in main with the file filters above, runs `importSongFile` in a `worker_thread` so a big file never freezes the window, and returns the new song's summary or a plain error), `src/preload/*` (`pianoLearner.songs`), `src/renderer/src/routes.ts` + test (`#/play/<id>`), `Library.tsx` + css (enable "Import file", list songs, empty state wording updated), `Play.tsx` (load the song by id, else the sample), `e2e/app.spec.ts` (import a fixture MIDI by stubbing the dialog in main for tests through an env var read only when `PIANO_LEARNER_E2E=1`; the song shows in the list and opens on Play).
 Acceptance: npm test, lint, typecheck, build, e2e pass; screenshots light and dark of the library with two songs.
 
 ## Step 3 · Song player in the engine (builder-plus, hard)
@@ -32,3 +32,4 @@ Acceptance: npm test, lint, typecheck, build, e2e pass.
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder-plus (Sonnet) | 2 | FAIL (a pickup bar left a silent gap), then PASS. Later: use implicit="yes" before the length check for pickups; tempos inside a pickup bar are not shifted. |
