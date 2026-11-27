@@ -11,9 +11,8 @@ use crate::core::midi_msg::{self, MidiEvent};
 use crate::core::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
-use std::sync::OnceLock;
 use std::thread::{JoinHandle, Thread};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub use local::LocalState;
 pub use watch::{list_inputs, MidirBackend, OpenPort, OutPort, PortBackend};
@@ -28,8 +27,7 @@ pub const POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Microseconds on a clock that only goes forward (zero at the first call in
 /// this process). Every event is stamped with it as the MIDI thread sees it.
 pub fn now_us() -> u64 {
-    static START: OnceLock<Instant> = OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_micros() as u64
+    crate::core::clock::now_us()
 }
 
 fn relock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -242,7 +240,7 @@ impl InputHandler {
         let Some(event) = midi_msg::parse(bytes) else { return };
         let time_us = now_us();
         self.hub.events.fetch_add(1, Ordering::Relaxed);
-        if !self.hub.sink.push(event.into()) {
+        if !self.hub.sink.push(event.into_command(time_us)) {
             self.hub.dropped_sound.fetch_add(1, Ordering::Relaxed);
         }
         let pushed = match self.js.try_lock() {
@@ -443,7 +441,7 @@ mod tests {
         let (mut h, hub, _js) = handler(&sink);
         h.handle(&[0x90, 69, 90]);
         h.handle(&[0x80, 69, 0]);
-        assert_eq!(rx.pop(), Ok(Command::NoteOn { note: 69, velocity: 90 }));
+        assert!(matches!(rx.pop(), Ok(Command::NoteOn { note: 69, velocity: 90, .. })));
         assert_eq!(rx.pop(), Ok(Command::NoteOff { note: 69 }));
         assert_eq!((hub.dropped_sound(), hub.dropped_screen()), (0, 0));
     }
@@ -458,9 +456,9 @@ mod tests {
         let (tx2, mut rx2) = channel(16);
         sink.set(Some(tx2)); // the output restarted
         h.handle(&[0x90, 62, 80]);
-        assert_eq!(rx1.pop(), Ok(Command::NoteOn { note: 60, velocity: 80 }));
+        assert!(matches!(rx1.pop(), Ok(Command::NoteOn { note: 60, velocity: 80, .. })));
         assert!(rx1.pop().is_err(), "the old consumer gets nothing new");
-        assert_eq!(rx2.pop(), Ok(Command::NoteOn { note: 62, velocity: 80 }));
+        assert!(matches!(rx2.pop(), Ok(Command::NoteOn { note: 62, velocity: 80, .. })));
     }
 
     #[test]
@@ -527,5 +525,27 @@ mod tests {
         svc.note_screen_drops(3);
         let s = svc.status();
         assert_eq!((s.dropped_sound, s.dropped_screen), (0, 3));
+    }
+
+    #[test]
+    fn the_audio_ring_note_carries_the_same_stamp_the_screens_get() {
+        let sink = Arc::new(MidiSink::default());
+        let (tx, mut rx) = channel(16);
+        sink.set(Some(tx));
+        let (mut h, _hub, mut js) = handler(&sink);
+        let before = now_us();
+        h.handle(&[0x90, 69, 90]);
+        let after = now_us();
+        let Ok(Command::NoteOn { midi_us, .. }) = rx.pop() else { panic!("a note on") };
+        assert_eq!(midi_us, js.pop().unwrap().time_us, "one stamp, taken once in the callback");
+        assert!((before..=after).contains(&midi_us));
+    }
+
+    #[test]
+    fn the_midi_clock_is_the_shared_engine_clock() {
+        let a = crate::core::clock::now_us();
+        let m = now_us();
+        let b = crate::core::clock::now_us();
+        assert!(a <= m && m <= b);
     }
 }

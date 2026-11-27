@@ -15,6 +15,7 @@ Tests first: the clock never goes backwards across threads; a NoteOn with `midi_
 Acceptance: cargo test, clippy (plain + all-targets), Windows check, `npm run build` in the crate, node check that `latencySummary()` returns zeros and count 0 here.
 
 ## Step 2 · The latency test screen and report (builder)
+Notes from step 1: `latencySummary().backend` is "" when no output is running. Call `clearLatency()` when the Delay test screen opens and on Test again, and whenever sound restarts, so a report never mixes two settings. The output part is the value measured when sound started; the report says so ("measured when sound started").
 Files: `src/main/ipc.ts`, `src/main/audioController.ts` + test (`latency:summary`, `latency:clear`, `latency:save` writes `latency-report.txt` and `.json` to the app's user data folder and returns the path; `latency:open-folder` uses `shell.showItemInFolder`), `src/preload/*` (`pianoLearner.latency.{summary,clear,save,showFile}`), `src/shared/latency.ts` + test (pure: `verdict(summary)` → `'good'` when p95 < 10 ms, `'close'` 10–15, `'slow'` above; report text builder), `src/renderer/src/routes.ts` (+ `latency`), `src/renderer/src/screens/Latency.tsx` + `.module.css`, a "Test the delay" link on the Sound screen, `scripts/screens.config.ts`, `e2e/app.spec.ts`.
 Screen (plain words, tokens only, ≥ 44 px, symbol + word):
 - Heading "Delay test". One line: "Play any key on the piano 20 times, at any speed. The app measures how long each key takes to sound."
@@ -29,3 +30,4 @@ Acceptance: npm test, lint, build, e2e pass; screenshots light and dark of the D
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder-plus (Sonnet) | 1 | PASS. The estimate errs high (WASAPI exclusive: buffer + stream latency; cpal: measured delay). |

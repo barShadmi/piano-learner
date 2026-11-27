@@ -208,6 +208,70 @@ pub fn status() -> JsStatus {
     }
 }
 
+#[napi(object, js_name = "LatencySample")]
+pub struct JsLatencySample {
+    /// MIDI note number of the key.
+    pub note: u8,
+    /// MIDI message arrived to the audio callback that picked it up, in ms.
+    pub wait_ms: f64,
+    /// Audio callback to sound leaving the device, in ms (from the output latency).
+    pub output_ms: f64,
+    /// `waitMs + outputMs` plus 1.0 ms for USB MIDI (an estimate), in ms.
+    pub total_ms: f64,
+}
+
+#[napi(object, js_name = "LatencySummary")]
+pub struct JsLatencySummary {
+    /// How many key timings are remembered (at most 200).
+    pub count: f64,
+    pub median_ms: f64,
+    /// 95 out of 100 keys were faster than this (nearest rank), in ms.
+    #[napi(js_name = "p95Ms")]
+    pub p95_ms: f64,
+    pub max_ms: f64,
+    /// Output latency of the running sound output, in ms (0 = no output).
+    pub output_ms: f64,
+    pub buffer_frames: u32,
+    pub sample_rate: u32,
+    /// "wasapi-exclusive", "wasapi-shared", "asio" or "cpal" ("" = no output).
+    pub backend: String,
+    pub underruns: f64,
+}
+
+/// Key timings since the last call, oldest first. Each key is returned once.
+#[napi]
+pub fn latency_samples() -> Vec<JsLatencySample> {
+    ENGINE
+        .latency_samples()
+        .into_iter()
+        .map(|r| JsLatencySample { note: r.note, wait_ms: r.wait_ms, output_ms: r.output_ms, total_ms: r.total_ms })
+        .collect()
+}
+
+/// Median, 95th percentile and slowest of the last 200 keys (total time), and
+/// how the sound output is set up. All zero before any key was played.
+#[napi]
+pub fn latency_summary() -> JsLatencySummary {
+    let s = ENGINE.latency_summary();
+    JsLatencySummary {
+        count: s.count as f64,
+        median_ms: s.median_ms,
+        p95_ms: s.p95_ms,
+        max_ms: s.max_ms,
+        output_ms: s.output_ms,
+        buffer_frames: s.buffer_frames,
+        sample_rate: s.sample_rate,
+        backend: s.backend,
+        underruns: s.underruns as f64,
+    }
+}
+
+/// Forget every remembered key timing.
+#[napi]
+pub fn clear_latency() {
+    ENGINE.clear_latency();
+}
+
 #[napi(object, js_name = "MidiEvent")]
 pub struct JsMidiEvent {
     #[napi(ts_type = "'on' | 'off' | 'sustain' | 'allOff'")]
