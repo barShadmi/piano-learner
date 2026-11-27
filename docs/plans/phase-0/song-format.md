@@ -34,3 +34,16 @@ Acceptance:
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder (Haiku) | 1 | PASS (lead added src/shared to typecheck) |
+| 2 | builder (Haiku) | 1 | PASS |
+
+## Step 2 · Close validator gaps found by the verifier (builder)
+Files: `src/shared/song/validate.ts`, `src/shared/song/validate.test.ts`.
+Add checks, each with a failing test first that asserts the exact error path:
+1. Every tempo: start finite and >= 0, starts strictly increasing, bpm 20..300 (not only the first).
+2. `fingerSource`, when present, is 'printed' | 'auto' | 'user'.
+3. `source`: sheet/midi/musicxml need a non-empty `fileName`; video needs at least one of a non-empty `url` or `fileName`.
+4. `level`, when present, is 'melody' | 'melody-bass' | 'full'; `composer`, when present, is a non-empty string.
+5. Iterate arrays with an index loop so holes are reported (`notes[1]: must be an object`).
+6. Add tests for: pitch 20 (too low), an unknown `source.kind`, a bad `beatUnit`.
+Acceptance: all old and new tests pass; typecheck and lint pass; only the two files change.
