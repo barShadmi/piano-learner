@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test --trace off",
-    "screens": "npm run build && tsx scripts/screens.ts"
+    "screens": "npm run build && tsx scripts/screens.ts",
+    "dist:win": "npm run build && electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "react": "19.3.1",
@@ -26,6 +27,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
     "electron": "45.5.0",
+    "electron-builder": "26.18.0",
     "electron-vite": "6.0.0",
     "eslint": "10.15.0",
     "eslint-plugin-react-hooks": "7.1.1",

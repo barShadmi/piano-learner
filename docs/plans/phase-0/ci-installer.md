@@ -24,3 +24,7 @@ Acceptance:
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder-plus (Sonnet) | 1 | PASS |
+| 2 | builder-plus (Sonnet) | 1 | PASS (lead added read-only permissions and fail-if-no-installer) |
+
+The real Windows installer is proven by the first CI run on GitHub.

@@ -1,0 +1,19 @@
+appId: com.barshadmi.pianolearner
+productName: PianoLearner
+asar: true
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: PianoLearner-Setup-${version}.exe
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: PianoLearner-Setup-${version}.exe
