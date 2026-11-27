@@ -118,3 +118,8 @@
   font-size: var(--text-md);
   color: var(--text);
 }
+
+/* The Open Sound link keeps its size next to a long message. */
+.soundLine > a {
+  flex-shrink: 0;
+}
