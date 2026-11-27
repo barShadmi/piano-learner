@@ -14,7 +14,7 @@ Decisions (lead):
 - A frame counter for checks: `FallingNotes` keeps the number of frames drawn in a `data-frames` attribute on its wrapper, updated at most twice a second (not every frame), so tests can see that it runs. The real FPS (frames in the last second) is in `data-fps`.
 
 ## Step 1 · Song time and visible notes (builder)
-Files: `src/renderer/src/falling/songTime.ts` + test (`beatToSeconds(tempos, beat)`, `secondsToBeat(tempos, seconds)`, `songNotesInSeconds(song)` → sorted array of `{ id, pitch, hand, finger?, startS, endS }`, `songLengthSeconds(song)`), `src/renderer/src/falling/clock.ts` + test (`SongClock` with an injectable `now()`), `src/renderer/src/falling/visible.ts` + test (`visibleRange(notes, nowS, lookaheadS)` → `[from, to)` indexes using binary search, including notes that started before now and are still sounding; `soundingNotes(notes, nowS)`; `noteRect(note, nowS, lookaheadS, widthPx, heightPx)` → `{ x, y, w, h }` using keyboardLayout).
+Files: `src/renderer/src/falling/songTime.ts` + test (`beatToSeconds(tempos, beat)`, `secondsToBeat(tempos, seconds)`, `songNotesInSeconds(song)` → `TimedNotes = { notes, maxDurationS }`, notes sorted, each `{ id, pitch, hand, finger?, startS, endS }`, `songLengthSeconds(song)`), `src/renderer/src/falling/clock.ts` + test (`SongClock` with an injectable `now()`), `src/renderer/src/falling/visible.ts` + test (`visibleRange(timed, nowS, lookaheadS)` → `[from, to)` indexes using binary search; a superset, so callers still check `endS > nowS`; `soundingNotes(timed, nowS)` (allocates; not for the draw loop); `noteRect(note, nowS, lookaheadS, widthPx, heightPx)` → `{ x, y, w, h }` using keyboardLayout).
 Tests first: one tempo and two tempos (beat 0..4 at 120 then 60 bpm); seconds↔beats round trip; notes sorted by start; clock play/pause/seek/speed with a fake now; visibleRange equals a brute-force filter on 2,000 random notes for 200 random times; a note starting now has its bottom at heightPx; a note starting in 3 s is just above the top; black key notes are narrower than white key notes; a 2,000-note song: 10,000 calls to visibleRange take under 50 ms.
 Acceptance: npm test, lint, typecheck pass.
 
@@ -26,3 +26,4 @@ Acceptance: npm test, lint, typecheck, build, e2e pass; screenshots light and da
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder (Haiku) | 1 | PASS. visibleRange is a superset by design (sorted by start only); the draw loop checks endS > nowS and sizes the pool from visible notes. |
