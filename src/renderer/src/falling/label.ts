@@ -13,7 +13,10 @@ export type LabelSizes = {
   textWidth: (text: string, size: number) => number
 }
 
-export type Label = { text: string; size: number }
+export type Mark =
+  | { kind: 'label'; text: string; size: number }
+  // Too small for any text: an edge stripe shows the hand (right edge for right, left edge for left).
+  | { kind: 'stripe'; side: Hand }
 
 // Built once so choosing a label never makes a new string.
 const FULL: Record<Hand, readonly string[]> = {
@@ -23,7 +26,7 @@ const FULL: Record<Hand, readonly string[]> = {
 
 /**
  * Tries, in order: hand and finger at the larger size, the same at the smaller size,
- * the hand letter alone at the larger size, then at the smaller size. Undefined when none fits.
+ * the hand letter alone at the larger size, then at the smaller size. Otherwise an edge stripe, so the hand is never colour alone.
  */
 export function chooseLabel(
   hand: Hand,
@@ -31,15 +34,15 @@ export function chooseLabel(
   width: number,
   height: number,
   sizes: LabelSizes
-): Label | undefined {
+): Mark {
   const letter = FULL[hand][0]
   const full = finger === undefined ? letter : FULL[hand][finger]
   const sizeList = [sizes.md, sizes.sm]
   const texts = full === letter ? [letter] : [full, letter]
   for (const text of texts) {
     for (const size of sizeList) {
-      if (size + sizes.inset <= height && sizes.textWidth(text, size) <= width) return { text, size }
+      if (size + sizes.inset <= height && sizes.textWidth(text, size) <= width) return { kind: 'label', text, size }
     }
   }
-  return undefined
+  return { kind: 'stripe', side: hand }
 }

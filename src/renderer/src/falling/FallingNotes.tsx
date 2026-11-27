@@ -320,11 +320,18 @@ export default function FallingNotes({ timed, clock, onSounding, endS, onEnd }: 
         s.g.clear()
         s.g.roundRect(0, 0, w, h, r).fill(colour).stroke({ width: 1, color: t.edge, alignment: 1 })
         const choice = chooseLabel(n.hand, n.finger, w, h, t.labels)
-        s.label.visible = choice !== undefined
-        if (choice !== undefined) {
+        const textColour = n.hand === 'right' ? t.rightText : t.leftText
+        s.label.visible = choice.kind === 'label'
+        if (choice.kind === 'stripe') {
+          // No room for text: a full-height stripe on the hand's own edge (right hand right, left hand left).
+          // It sits half a stripe in from the edge, so the note's own colour shows on both sides of it.
+          const sw = Math.min(t.labels.inset, w / 3)
+          const gap = sw / 2
+          s.g.rect(choice.side === 'right' ? w - gap - sw : gap, 0, sw, h).fill(textColour)
+        } else {
           s.label.text = choice.text
           s.label.style.fontSize = choice.size
-          s.label.tint = n.hand === 'right' ? t.rightText : t.leftText
+          s.label.tint = textColour
           s.label.x = w / 2
           s.label.y = h - t.labels.inset
         }
