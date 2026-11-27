@@ -12,5 +12,5 @@ Tags: (B) builder, (B+) builder-plus, (L) lead. `hard` steps go straight to buil
 - [x] Design tokens: hand colours, right/wrong colours, fonts, spacing, light and dark (B) [design-systems]
 
 ## Gate
-- [ ] Review board passed (no Blocking item left)
+- [x] Review board passed (no Blocking item left)
 - [ ] Bar: Install the .exe from a PR; the app opens and shows an empty song library
