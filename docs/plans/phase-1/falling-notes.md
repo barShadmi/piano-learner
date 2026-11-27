@@ -1,0 +1,28 @@
+# Phase 1 · Task 8 · Falling notes view at 60 fps, a colour per hand
+
+Goal: on the Play screen, a song's notes fall towards the 88-key keyboard and reach a key exactly when it should be played. Right-hand notes are blue, left-hand notes orange, and each note also carries a letter or finger number so colour is never the only signal. It runs smoothly at 60 frames a second.
+
+Decisions (lead):
+- Renderer: PixiJS `pixi.js@8.22.0` (exact version), one WebGL canvas above the keyboard on the Play screen, same width as the keyboard. Created once on mount, destroyed on unmount.
+- Geometry: a note's x and width come from the same `keyboardLayout` as the keyboard (percent of 52 white-key units), so a falling note lines up with its key. Black-key notes are drawn on top of white-key notes. The note's bottom edge touches the top of the keyboard at its start time; its height is its duration. The view shows the next 3 seconds (`LOOKAHEAD_S = 3`), so pixels per second = canvas height / 3.
+- Colours: read `--hand-right` and `--hand-left` from CSS at mount and when the theme changes (watch `data-theme` on `<html>` with a MutationObserver), never hard-coded. Notes are rounded rectangles (`--radius-1` value read from CSS too).
+- Second signal: inside each note, its finger number if the song has one, otherwise "R" or "L", drawn in `--on-accent`-style contrast text (white on the dark-blue/orange in light, dark on the light-blue/orange in dark: read `--surface` / `--text` and pick the one with more contrast against the hand colour). Text only when the note is at least 14 px wide and 14 px tall. Under the canvas, a small legend: "Blue = right hand (R) · Orange = left hand (L)".
+- Speed and smoothness: no allocation per frame in the draw loop. Notes are drawn from a pool of reusable Pixi objects (Graphics + Text/BitmapText) sized to the most notes ever visible; a frame only moves, shows or hides them. Finding the visible notes uses binary search on notes sorted by start time (`visibleRange`). Text uses `BitmapText` with a font installed once.
+- Clock: `SongClock` (pure TS) based on `performance.now()`, with `play()`, `pause()`, `seek(seconds)`, `nowSeconds()`, and `speed` (1 = normal; set at play; later modes use 0.5). Beats → seconds with the song's tempo map (`beatToSeconds`, `secondsToBeat`), handling several tempo changes.
+- The Play screen gets a song strip above the canvas: "Song: Canon in D (opening)" (the bundled sample from `src/shared/song/samples/canon-opening.json`, loaded with `validateSong`), and buttons "Start", "Pause", "Back to the start" (≥ 44 px). The song starts 2 seconds before its first note so the first notes can be seen falling in. At the end it stops by itself. While playing, the keyboard lights the song's notes that are sounding right now in their hand colour (`lit` 'right' / 'left'); a key Bar presses shows 'pressed' and wins over the song's colour. No sound for the song in this task (task 9, Listen mode, plays it through the engine).
+- Reduced motion: falling notes keep moving (they are the content, CLAUDE.md). Nothing else animates.
+- A frame counter for checks: `FallingNotes` keeps the number of frames drawn in a `data-frames` attribute on its wrapper, updated at most twice a second (not every frame), so tests can see that it runs. The real FPS (frames in the last second) is in `data-fps`.
+
+## Step 1 · Song time and visible notes (builder)
+Files: `src/renderer/src/falling/songTime.ts` + test (`beatToSeconds(tempos, beat)`, `secondsToBeat(tempos, seconds)`, `songNotesInSeconds(song)` → sorted array of `{ id, pitch, hand, finger?, startS, endS }`, `songLengthSeconds(song)`), `src/renderer/src/falling/clock.ts` + test (`SongClock` with an injectable `now()`), `src/renderer/src/falling/visible.ts` + test (`visibleRange(notes, nowS, lookaheadS)` → `[from, to)` indexes using binary search, including notes that started before now and are still sounding; `soundingNotes(notes, nowS)`; `noteRect(note, nowS, lookaheadS, widthPx, heightPx)` → `{ x, y, w, h }` using keyboardLayout).
+Tests first: one tempo and two tempos (beat 0..4 at 120 then 60 bpm); seconds↔beats round trip; notes sorted by start; clock play/pause/seek/speed with a fake now; visibleRange equals a brute-force filter on 2,000 random notes for 200 random times; a note starting now has its bottom at heightPx; a note starting in 3 s is just above the top; black key notes are narrower than white key notes; a 2,000-note song: 10,000 calls to visibleRange take under 50 ms.
+Acceptance: npm test, lint, typecheck pass.
+
+## Step 2 · Pixi view and Play screen (builder-plus) [frontend-design, animate]
+Files: `package.json` + lock (`pixi.js@8.22.0`, exact), `src/renderer/src/falling/FallingNotes.tsx` + `.module.css`, `src/renderer/src/screens/Play.tsx` + css, `src/renderer/src/keyboard/keysDown.ts` or a small helper for merging 'pressed' over song colours (+ test), `e2e/app.spec.ts`, CSP in `src/renderer/index.html` only if Pixi needs it (WebGL needs no CSP change; do not add 'unsafe-eval' — use Pixi's `pixi.js/unsafe-eval` only if it truly fails without it, and say so).
+e2e: the Play screen shows "Song: Canon in D (opening)"; press Start; after 1.5 s `data-frames` has grown by at least 45 (at least 30 fps in the CI VM) and the "Pause" button works; "Back to the start" resets. Screenshots light and dark of the Play screen 4 seconds into the song (notes falling and some keys lit).
+Acceptance: npm test, lint, typecheck, build, e2e pass; screenshots light and dark; the lead looks at them.
+
+## Log
+| Step | Built by | Tries | Verifier |
+| --- | --- | --- | --- |
