@@ -2,6 +2,8 @@
 const ATTACK_MS: u32 = 5;
 /// Release time in milliseconds (linear, full scale).
 const RELEASE_MS: u32 = 20;
+/// Fade-out time in milliseconds for a voice that is being stolen.
+const STEAL_MS: u32 = 2;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
@@ -17,6 +19,11 @@ pub struct ToneVoice {
     sample_rate: f64,
     attack_step: f32,
     release_step: f32,
+    steal_step: f32,
+    /// Step used by the release stage that is running now.
+    fade_step: f32,
+    /// A tone waiting for this voice's fast fade-out to finish: (Hz, seconds, gain).
+    pending: Option<(f32, f32, f32)>,
     stage: Stage,
     env: f32,
     gain: f32,
@@ -33,6 +40,9 @@ impl ToneVoice {
             sample_rate: f64::from(sr),
             attack_step: 1.0 / frames(ATTACK_MS),
             release_step: 1.0 / frames(RELEASE_MS),
+            steal_step: 1.0 / frames(STEAL_MS),
+            fade_step: 1.0 / frames(RELEASE_MS),
+            pending: None,
             stage: Stage::Idle,
             env: 0.0,
             gain: 0.0,
@@ -49,12 +59,28 @@ impl ToneVoice {
         self.remaining = (f64::from(seconds.max(0.0)) * self.sample_rate).round() as u64;
         self.phase = 0.0;
         self.env = 0.0;
+        self.fade_step = self.release_step;
         self.stage = Stage::Attack;
+        self.pending = None;
+    }
+
+    /// Start a tone on a voice that may still be sounding: the old tone fades
+    /// out over about 2 ms, then the new one starts (no click).
+    pub fn steal(&mut self, frequency_hz: f32, seconds: f32, gain: f32) {
+        if self.stage == Stage::Idle {
+            self.start(frequency_hz, seconds, gain);
+        } else {
+            self.pending = Some((frequency_hz, seconds, gain));
+            self.fade_step = self.steal_step;
+            self.stage = Stage::Release;
+        }
     }
 
     /// Begin the fade-out from the current level.
     pub fn release(&mut self) {
         if self.stage != Stage::Idle {
+            self.pending = None;
+            self.fade_step = self.release_step;
             self.stage = Stage::Release;
         }
     }
@@ -67,6 +93,11 @@ impl ToneVoice {
         self.env
     }
 
+    #[cfg(test)]
+    pub fn phase(&self) -> f64 {
+        self.phase
+    }
+
     /// Next mono sample. The envelope used is the one before this step, so the
     /// first sample of a new voice is exactly 0.
     pub fn next_sample(&mut self) -> f32 {
@@ -75,9 +106,7 @@ impl ToneVoice {
         }
         let out = (self.phase * std::f64::consts::TAU).sin() as f32 * self.env * self.gain;
         self.phase += self.phase_inc;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
+        self.phase -= self.phase.floor();
         match self.stage {
             Stage::Attack => {
                 self.env += self.attack_step;
@@ -89,10 +118,13 @@ impl ToneVoice {
             }
             Stage::Sustain => self.count_down(),
             Stage::Release => {
-                self.env -= self.release_step;
+                self.env -= self.fade_step;
                 if self.env <= 0.0 {
                     self.env = 0.0;
                     self.stage = Stage::Idle;
+                    if let Some((hz, secs, gain)) = self.pending.take() {
+                        self.start(hz, secs, gain);
+                    }
                 }
             }
             Stage::Idle => {}
@@ -152,5 +184,15 @@ mod tests {
         let mut v = ToneVoice::new(SR);
         assert!(!v.is_active());
         assert_eq!(v.next_sample(), 0.0);
+    }
+
+    #[test]
+    fn phase_stays_in_zero_to_one_even_for_huge_steps() {
+        let mut v = ToneVoice::new(SR);
+        v.start(SR as f32 * 3.5, 1.0, 0.5);
+        for _ in 0..1000 {
+            v.next_sample();
+            assert!((0.0..1.0).contains(&v.phase()), "phase {}", v.phase());
+        }
     }
 }

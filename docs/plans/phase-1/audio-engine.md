@@ -51,3 +51,4 @@ Acceptance: `npm test`, `npm run lint`, `npm run build`, `xvfb-run -a npm run te
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
 | 1 | builder-plus (Sonnet) | 1 | PASS (voice-steal click, volume ramp, phase wrap moved to step 2) |
+| 2 | builder-plus (Sonnet) | 2 | FAIL (ASIO buffer step, latency, sync start, 5 minor), then PASS. Lead: measured cpal/ASIO latency is used on its own (it already holds the buffer). ASIO uses the driver's preferred size if the requested one is refused (cpal hides the step). |

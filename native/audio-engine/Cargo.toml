@@ -7,8 +7,30 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Turned on only by the Windows CI build (needs the Steinberg SDK at build time).
+asio = ["cpal/asio"]
+# Test-only: no napi bindings (see dev-dependencies).
+noop = ["napi/noop", "napi-derive/noop"]
+
 [dependencies]
 rtrb = "0.4.1"
+cpal = "0.18.2"
+napi = { version = "3.16.3", default-features = false, features = ["napi9"] }
+napi-derive = "3.7.2"
+
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.27.0"
+windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation"] }
+
+# Tests are plain executables that Node never loads, so the napi bindings
+# (src/api.rs) are left out of them. This dev-only self dependency switches the
+# `noop` feature on while testing (resolver 2 keeps it out of the real build).
+[dev-dependencies]
+audio-engine = { path = ".", features = ["noop"] }
+
+[build-dependencies]
+napi-build = "2.7.0"
 
 [profile.release]
 opt-level = 3

@@ -1,3 +1,7 @@
-//! Piano Learner audio engine. Step 1: platform-free core only.
+//! Piano Learner audio engine.
 
 pub mod core;
+pub mod output;
+
+#[cfg(not(feature = "noop"))]
+pub mod api;

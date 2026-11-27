@@ -1,6 +1,6 @@
 //! Platform-free engine core: commands in, interleaved samples out.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 pub use command::Command;
 pub use mixer::Mixer;
@@ -12,6 +12,23 @@ pub struct EngineStats {
     pub last_buffer_frames: AtomicU32,
     pub underruns: AtomicU64,
     pub running: AtomicBool,
+    /// Set when the output stopped by itself because the device failed.
+    pub failed: AtomicBool,
+    /// Playback time minus callback time as the driver reports it, in
+    /// microseconds (0 = not measured).
+    pub measured_latency_us: AtomicU32,
+}
+
+impl EngineStats {
+    /// Zero every counter for a new start.
+    pub fn reset(&self) {
+        self.callbacks.store(0, Ordering::Relaxed);
+        self.last_buffer_frames.store(0, Ordering::Relaxed);
+        self.underruns.store(0, Ordering::Relaxed);
+        self.measured_latency_us.store(0, Ordering::Relaxed);
+        self.failed.store(false, Ordering::Relaxed);
+        self.running.store(false, Ordering::Release);
+    }
 }
 
 /// Lock-free command channel (single producer, single consumer).
@@ -79,5 +96,22 @@ mod tests {
         assert_eq!(s.last_buffer_frames.load(Relaxed), 0);
         assert_eq!(s.underruns.load(Relaxed), 0);
         assert!(!s.running.load(Relaxed));
+        assert!(!s.failed.load(Relaxed));
+        assert_eq!(s.measured_latency_us.load(Relaxed), 0);
+    }
+
+    #[test]
+    fn reset_zeroes_every_counter() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let s = EngineStats::default();
+        s.callbacks.store(5, Relaxed);
+        s.underruns.store(2, Relaxed);
+        s.measured_latency_us.store(900, Relaxed);
+        s.failed.store(true, Relaxed);
+        s.reset();
+        assert_eq!(s.callbacks.load(Relaxed), 0);
+        assert_eq!(s.underruns.load(Relaxed), 0);
+        assert_eq!(s.measured_latency_us.load(Relaxed), 0);
+        assert!(!s.failed.load(Relaxed));
     }
 }
