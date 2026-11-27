@@ -1,0 +1,157 @@
+/* The keyboard keeps the proportions of a real piano: the 52 white keys
+   span the width, and the height is 5.5 white-key widths. Capping the width
+   at 30vh of the window keeps the height at 30vh or less; the keyboard is
+   then narrower and centred. */
+.keyboard {
+  width: min(100%, calc(30vh * 52 / 5.5));
+  margin: 0 auto;
+}
+
+.board {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 52 / 5.5;
+}
+
+.key {
+  position: absolute;
+  top: 0;
+  box-sizing: border-box;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.white {
+  height: 100%;
+  background: var(--key-white);
+  border: 1px solid var(--border-strong);
+  border-radius: 0 0 var(--radius-2) var(--radius-2);
+}
+
+.black {
+  z-index: 1;
+  height: 62%;
+  background: var(--key-black);
+  border: 1px solid var(--key-black);
+  border-radius: 0 0 var(--radius-1) var(--radius-1);
+}
+
+/* A pressed key sinks 2 px, gets a muted grey fill and a dot. Three signals, not colour alone.
+   The same grey on white and black keys, so a pressed white key never looks like a black key. */
+.key[data-state='pressed'] {
+  transform: translateY(2px);
+  background: var(--text-muted);
+}
+
+/* The song's hands: soft fill, a bar along the bottom, and a letter on white keys. */
+.key[data-state='right'] {
+  background: var(--hand-right-soft);
+}
+
+.key[data-state='left'] {
+  background: var(--hand-left-soft);
+}
+
+.bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--space-2);
+  background: var(--hand-right);
+}
+
+.key[data-state='left'] .bar {
+  background: var(--hand-left);
+}
+
+.letter {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--space-4);
+  text-align: center;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--hand-right);
+}
+
+.key[data-state='left'] .letter {
+  color: var(--hand-left);
+}
+
+/* The dot sits near the bottom edge. It uses --on-accent: a white dot on the dark grey fill (light theme),
+   a dark dot on the light grey fill (dark theme). */
+.dot {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-2);
+  width: var(--space-2);
+  height: var(--space-2);
+  transform: translateX(-50%);
+  border-radius: var(--radius-full);
+  background: var(--on-accent);
+}
+
+.labels {
+  position: relative;
+  width: 100%;
+  height: calc(var(--text-sm) * 3);
+  margin-top: var(--space-2);
+}
+
+.cLabel {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.middle {
+  display: block;
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .key {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .white {
+    background: Canvas;
+    border-color: ButtonBorder;
+  }
+
+  .black {
+    background: CanvasText;
+    border-color: ButtonBorder;
+  }
+
+  .key[data-state='pressed'] {
+    background: Highlight;
+  }
+
+  .key[data-state='right'],
+  .key[data-state='left'] {
+    background: Canvas;
+  }
+
+  .key[data-state='right'] .bar,
+  .key[data-state='left'] .bar {
+    background: CanvasText;
+  }
+
+  .letter,
+  .cLabel {
+    color: CanvasText;
+  }
+
+  .key[data-state='pressed'] .dot {
+    background: HighlightText;
+  }
+}

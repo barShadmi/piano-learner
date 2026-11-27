@@ -31,6 +31,8 @@
   --key-white: #ffffff;
   --key-black: #1c1b19;
   --key-border: #b9b7ae;
+  /* Alias for key edges and strong lines (no new value). */
+  --border-strong: var(--text-muted);
 
   /* Spacing scale */
   --space-1: 4px;
@@ -91,4 +93,5 @@
   --key-white: #e9e8e4;
   --key-black: #0c0c0f;
   --key-border: #4a4a55;
+  --border-strong: var(--text-muted);
 }
