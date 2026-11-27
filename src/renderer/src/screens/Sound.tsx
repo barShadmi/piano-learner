@@ -5,6 +5,8 @@ import {
   backendWords,
   lastKeyLine,
   latestKeyDown,
+  LOCAL_CONTROL_TIP,
+  localControlLine,
   PIANO_SOUND_CREDIT,
   pianoLine,
   pianoProblem,
@@ -145,6 +147,7 @@ export default function Sound() {
   const pianoBadge = piano === undefined ? 'Checking' : connected ? 'Connected' : 'Not found'
   const pianoGlyph = piano === undefined ? '…' : connected ? '✓' : '○'
   const problem = pianoProblem(piano)
+  const localLine = localControlLine(piano)
 
   return (
     <main className={styles.screen}>
@@ -212,6 +215,12 @@ export default function Sound() {
         <p className={styles.statusLine} role="status">
           {pianoLine(piano)}
         </p>
+        {localLine ? (
+          <>
+            <p className={styles.note}>{localLine}</p>
+            <p className={styles.note}>{LOCAL_CONTROL_TIP}</p>
+          </>
+        ) : null}
         {problem ? <p className={styles.reason}>Piano problem: {problem}</p> : null}
         <p className={styles.note}>{lastKeyLine(lastKey)}</p>
         <button type="button" className="button" onClick={reconnectPiano}>

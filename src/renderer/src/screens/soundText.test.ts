@@ -3,6 +3,8 @@ import {
   backendWords,
   lastKeyLine,
   latestKeyDown,
+  LOCAL_CONTROL_TIP,
+  localControlLine,
   noteName,
   pianoLine,
   pianoProblem,
@@ -75,7 +77,7 @@ describe('noteName', () => {
   })
 })
 
-const piano = { connected: false, events: 0, droppedSound: 0, droppedScreen: 0 }
+const piano = { connected: false, events: 0, droppedSound: 0, droppedScreen: 0, localControl: 'unknown' as const }
 
 describe('pianoLine', () => {
   it('says the piano is connected and names it', () => {
@@ -143,6 +145,41 @@ describe('pianoSoundLine', () => {
   it('has the credit line for the sampled piano', () => {
     expect(PIANO_SOUND_CREDIT).toBe(
       'Piano sound: Salamander Grand Piano by Alexander Holm (CC BY 3.0).'
+    )
+  })
+})
+
+describe('localControlLine', () => {
+  const connected = (localControl: 'off' | 'on' | 'unknown') => ({
+    ok: true as const,
+    status: { ...piano, connected: true, portName: 'Digital Piano', localControl }
+  })
+
+  it('says the piano speakers are off when Local Control is off', () => {
+    expect(localControlLine(connected('off'))).toBe(
+      "The piano's own speakers are off, so you hear the PC."
+    )
+  })
+
+  it('says the piano speakers may still be on when it is unknown', () => {
+    expect(localControlLine(connected('unknown'))).toBe(
+      "The piano's own speakers may still be on."
+    )
+  })
+
+  it('shows nothing when the piano is not connected', () => {
+    expect(localControlLine({ ok: true, status: { ...piano, localControl: 'off' } })).toBeUndefined()
+  })
+
+  it('shows nothing before the first answer, on a reply error, or when Local Control is on', () => {
+    expect(localControlLine(undefined)).toBeUndefined()
+    expect(localControlLine({ ok: false, error: 'No engine.' })).toBeUndefined()
+    expect(localControlLine(connected('on'))).toBeUndefined()
+  })
+
+  it('has the tip for hearing the sound twice, in the plan words', () => {
+    expect(LOCAL_CONTROL_TIP).toBe(
+      'If you hear the sound twice, hold METRONOME and RHYTHM on the piano and press the C5 key.'
     )
   })
 })

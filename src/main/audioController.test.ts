@@ -162,7 +162,13 @@ describe('createAudioController', () => {
   })
 })
 
-const idle: MidiStatus = { connected: false, events: 0, droppedSound: 0, droppedScreen: 0 }
+const idle: MidiStatus = {
+  connected: false,
+  events: 0,
+  droppedSound: 0,
+  droppedScreen: 0,
+  localControl: 'unknown'
+}
 
 function fakeMidi(over: Partial<MidiEngine> = {}) {
   const midi = {
@@ -232,6 +238,18 @@ describe('createAudioController piano (MIDI)', () => {
     c.stopMidi()
     expect(midi.stopped).toBe(1)
     expect(midi.callback).toBeUndefined()
+  })
+
+  it('passes on whether the piano speakers are off, as the engine reports it', () => {
+    const off: MidiStatus = { ...idle, connected: true, portName: 'P-121', localControl: 'off' }
+    const c = createAudioController({ engine: { ...fakeEngine(), ...fakeMidi({ midiStatus: () => off }) } })
+    expect(c.midiStatus()).toEqual({ ok: true, status: off })
+  })
+
+  it('says unknown when an older engine does not report Local Control', () => {
+    const older = { connected: true, portName: 'P-121', events: 0, droppedSound: 0, droppedScreen: 0 } as MidiStatus
+    const c = createAudioController({ engine: { ...fakeEngine(), ...fakeMidi({ midiStatus: () => older }) } })
+    expect(c.midiStatus()).toEqual({ ok: true, status: { ...older, localControl: 'unknown' } })
   })
 
   it('asks the engine to reconnect and says ok', () => {

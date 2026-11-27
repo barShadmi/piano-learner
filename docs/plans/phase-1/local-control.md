@@ -30,3 +30,4 @@ Acceptance: npm test, lint, build, e2e pass; screenshots light and dark.
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
 | 1 | builder-plus (Sonnet) | 1 | PASS. A connect with the setting off sends Local on (restores a piano left silent by a crash). Panel may show 'unknown' for one poll right after connect. |
+| 2 | builder (Haiku) | 1 | PASS. Tip shows with off and unknown. Lead: also restore Local on at Windows shutdown/log off (`session-end`). |
