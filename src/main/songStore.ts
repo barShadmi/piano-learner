@@ -2,18 +2,19 @@
 // Only the main process uses this. Every file name is a random UUID made here, so nothing
 // from the screen or from the imported file picks a path.
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { validateSong, type Song } from '../shared/song'
 import { isSongId, summaryOf, type SongSummary } from '../shared/songs'
 
 const EXTENSION = '.json'
 
-// Reads one song file. A file that is missing, broken, not a valid song, or whose id does
+// Checks the text of one song file. A file that is broken, not a valid song, or whose id does
 // not match its file name is skipped (undefined). Nothing else is read.
-function readSongFile(dir: string, id: string): Song | undefined {
+function songFrom(text: string, id: string): Song | undefined {
   try {
-    const checked = validateSong(JSON.parse(readFileSync(join(dir, id + EXTENSION), 'utf8')))
+    const checked = validateSong(JSON.parse(text))
     if (!checked.ok || checked.song.id !== id) return undefined
     return checked.song
   } catch {
@@ -21,29 +22,48 @@ function readSongFile(dir: string, id: string): Song | undefined {
   }
 }
 
+// Reads one song file (used by getSong, which stays synchronous).
+function readSongFileSync(dir: string, id: string): Song | undefined {
+  try {
+    return songFrom(readFileSync(join(dir, id + EXTENSION), 'utf8'), id)
+  } catch {
+    return undefined
+  }
+}
+
+// Reads one song file without blocking the main process (used by listSongs).
+async function readSongFile(dir: string, id: string): Promise<Song | undefined> {
+  try {
+    return songFrom(await readFile(join(dir, id + EXTENSION), 'utf8'), id)
+  } catch {
+    return undefined
+  }
+}
+
 // Every valid song in the folder, sorted by title. A missing folder means no songs.
-export function listSongs(dir: string): SongSummary[] {
+// The files are read in parallel and do not block the main process.
+export async function listSongs(dir: string): Promise<SongSummary[]> {
   let names: string[]
   try {
-    names = readdirSync(dir)
+    names = await readdir(dir)
   } catch {
     return []
   }
-  const songs: SongSummary[] = []
-  for (const name of names) {
-    if (!name.endsWith(EXTENSION)) continue
-    const id = name.slice(0, -EXTENSION.length)
-    if (!isSongId(id)) continue
-    const song = readSongFile(dir, id)
-    if (song) songs.push(summaryOf(song))
-  }
-  return songs.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
+  const ids = names
+    .filter((name) => name.endsWith(EXTENSION))
+    .map((name) => name.slice(0, -EXTENSION.length))
+    .filter((id) => isSongId(id))
+  const songs = await Promise.all(ids.map((id) => readSongFile(dir, id)))
+  return songs
+    .filter((song): song is Song => song !== undefined)
+    .map((song) => summaryOf(song))
+    .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
 }
 
 // The full song for an id. An id that is not a UUID is refused before any file is opened.
 export function getSong(dir: string, id: string): Song | undefined {
   if (!isSongId(id)) return undefined
-  return readSongFile(dir, id)
+  return readSongFileSync(dir, id)
 }
 
 // Saves a new song under a new random id. The id the song came with is ignored.

@@ -116,6 +116,36 @@ fn it_sleeps_until_three_ms_before_an_event_and_then_spins() {
     assert!((1..=310).contains(&spins), "spun {spins} times for the last 3 ms");
 }
 
+/// A clock whose sleeps are precise (a high-resolution timer): it asks for a half-millisecond spin.
+struct PreciseClock {
+    inner: Arc<FakeClock>,
+}
+
+impl Clock for PreciseClock {
+    fn now_us(&self) -> u64 {
+        self.inner.now_us()
+    }
+    fn sleep_us(&self, us: u64) {
+        self.inner.sleep_us(us)
+    }
+    fn spin(&self) {
+        self.inner.spin()
+    }
+    fn spin_us(&self) -> u64 {
+        500
+    }
+}
+
+#[test]
+fn a_precise_clock_sleeps_until_half_a_millisecond_before_an_event() {
+    let start = 5_000;
+    let inner = FakeClock::new(start, 0);
+    let clock = Arc::new(PreciseClock { inner: inner.clone() });
+    let log = Log::new(clock.clone());
+    run_song(&*clock, &*log, vec![ev(100.0, 60, true), ev(100.0, 60, false)], 0.0, start, &AtomicBool::new(false));
+    assert_eq!(*inner.sleeps.lock().unwrap(), vec![99_500], "one sleep that ends 0.5 ms early");
+}
+
 #[test]
 fn an_oversleeping_os_never_makes_an_event_early() {
     let start = 0;

@@ -17,20 +17,6 @@ export interface EngineStatus {
   measuredLatencyMs: number
 }
 
-export interface LatencySample {
-  /** MIDI note number of the key. */
-  note: number
-  /** MIDI message arrived to the audio callback that picked it up, in ms. */
-  waitMs: number
-  /** Audio callback to sound leaving the device, in ms (from the output latency). */
-  outputMs: number
-  /** `waitMs + outputMs` plus 1.0 ms for USB MIDI (an estimate), in ms. */
-  totalMs: number
-}
-
-/** Key timings since the last call, oldest first. Each key is returned once. */
-export declare function latencySamples(): Array<LatencySample>
-
 /**
  * Median, 95th percentile and slowest of the last 200 keys (total time), and
  * how the sound output is set up. All zero before any key was played.

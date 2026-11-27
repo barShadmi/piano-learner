@@ -72,8 +72,3 @@ export function songEventsPlan(timed: TimedNotes, velocityDefault: number = DEFA
   events.sort((a, b) => a.timeMs - b.timeMs || Number(a.on) - Number(b.on))
   return { events, cut }
 }
-
-/** The events for a song. See songEventsPlan. */
-export function songEventsFor(timed: TimedNotes, velocityDefault: number = DEFAULT_VELOCITY): SongEvent[] {
-  return songEventsPlan(timed, velocityDefault).events
-}
