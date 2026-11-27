@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -55,12 +55,24 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/audio-engine
       - run: npm ci
       # dist:win builds the sound engine with ASIO. asio-sys needs LLVM (libclang) for bindgen.
+      # asio-sys's own download unzips with PowerShell, which fails on the runner,
+      # so fetch the Steinberg ASIO SDK here and point the build at it.
+      - name: Get the ASIO SDK
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/asiosdk.zip" https://www.steinberg.net/asiosdk
+          7z x -y -o"$RUNNER_TEMP/asiosdk" "$RUNNER_TEMP/asiosdk.zip" > /dev/null
+          header=$(find "$RUNNER_TEMP/asiosdk" -name asiodrivers.h | head -n 1)
+          test -n "$header"
+          root=$(dirname "$(dirname "$header")")
+          ls "$root"
+          echo "CPAL_ASIO_DIR=$(cygpath -w "$root")" >> "$GITHUB_ENV"
       - run: npm run dist:win
         env:
           LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'
