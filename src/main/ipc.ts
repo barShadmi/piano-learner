@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { ipcMain, type BrowserWindow } from 'electron'
+import type { MidiEvent } from '../shared/audio'
 import type { AudioController } from './audioController'
 import { parseStartConfig, parseToneArgs } from './audioValidate'
 
@@ -18,4 +19,17 @@ export function registerAudioIpc(audio: AudioController): void {
     return audio.testTone(parsed.value)
   })
   ipcMain.handle('audio:status', () => audio.status())
+  // The piano questions: the status, and a reconnect. Key events go to the screen by sendMidiEvents.
+  ipcMain.handle('midi:status', () => audio.midiStatus())
+  ipcMain.handle('midi:reconnect', () => audio.reconnectMidi())
+}
+
+// Copies each batch of key events to the screen. Does nothing when there is no window.
+// The screen is told only the events; the sound never waits for it.
+export function sendMidiEvents(getWindow: () => BrowserWindow | null): (events: MidiEvent[]) => void {
+  return (events) => {
+    const win = getWindow()
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+    win.webContents.send('midi:event', events)
+  }
 }

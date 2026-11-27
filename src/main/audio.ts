@@ -3,9 +3,9 @@ import { existsSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pickAddonFile } from './addonFile'
-import type { Engine } from './audioController'
+import type { FullEngine } from './audioController'
 
-export type LoadedEngine = { engine: Engine; loadError?: undefined } | { engine?: undefined; loadError: string }
+export type LoadedEngine = { engine: FullEngine; loadError?: undefined } | { engine?: undefined; loadError: string }
 
 // Where the built sound engine file lives. In development it is next to its source.
 // In the installed app it is copied to resources/native by the installer.
@@ -27,13 +27,13 @@ export function loadEngine(): LoadedEngine {
       }
     }
     const nodeRequire = createRequire(__filename)
-    const addon = nodeRequire(join(folder, file)) as Partial<Record<keyof Engine, unknown>>
+    const addon = nodeRequire(join(folder, file)) as Partial<Record<keyof FullEngine, unknown>>
     for (const name of ['start', 'stop', 'playTestTone', 'listOutputs', 'status'] as const) {
       if (typeof addon[name] !== 'function') {
         return { loadError: 'The sound engine file is the wrong version.' }
       }
     }
-    return { engine: addon as unknown as Engine }
+    return { engine: addon as unknown as FullEngine }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     return { loadError: `The sound engine could not be loaded. ${detail}` }

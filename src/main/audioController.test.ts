@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createAudioController, type Engine } from './audioController'
-import type { StartResult } from '../shared/audio'
+import { createAudioController, type Engine, type MidiEngine } from './audioController'
+import type { MidiEvent, MidiStatus, StartResult } from '../shared/audio'
 
 const goodResult: StartResult = {
   backend: 'wasapi-exclusive',
@@ -154,5 +154,99 @@ describe('createAudioController', () => {
     })
     expect(await c.listOutputs()).toEqual({ ok: false, error: 'Could not list.' })
     expect(c.status()).toEqual({ ok: false, error: 'Broken.' })
+  })
+})
+
+const idle: MidiStatus = { connected: false, events: 0, droppedSound: 0, droppedScreen: 0 }
+
+function fakeMidi(over: Partial<MidiEngine> = {}) {
+  const midi = {
+    started: 0,
+    stopped: 0,
+    reconnects: 0,
+    callback: undefined as undefined | ((events: MidiEvent[]) => void),
+    startMidi() {
+      midi.started++
+    },
+    stopMidi() {
+      midi.stopped++
+      midi.callback = undefined
+    },
+    reconnectMidi() {
+      midi.reconnects++
+    },
+    midiStatus: (): MidiStatus => idle,
+    onMidiEvent(cb: (events: MidiEvent[]) => void) {
+      midi.callback = cb
+    },
+    ...over
+  }
+  return midi
+}
+
+const keyDown: MidiEvent = { kind: 'on', note: 60, velocity: 64, timeUs: 10 }
+
+describe('createAudioController piano (MIDI)', () => {
+  it('answers the piano status from the engine', () => {
+    const c = createAudioController({ engine: { ...fakeEngine(), ...fakeMidi() } })
+    expect(c.midiStatus()).toEqual({ ok: true, status: idle })
+  })
+
+  it('says the piano part is missing when the engine has none', () => {
+    const c = createAudioController({ engine: fakeEngine() })
+    expect(c.midiStatus()).toEqual({ ok: false, error: expect.any(String) })
+    expect(c.reconnectMidi()).toEqual({ ok: false, error: expect.any(String) })
+    expect(() => c.startMidi(() => {})).not.toThrow()
+    expect(() => c.stopMidi()).not.toThrow()
+  })
+
+  it('starts the piano and sends each batch of key events to the caller, in order', () => {
+    const midi = fakeMidi()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...midi } })
+    const received: MidiEvent[] = []
+    c.startMidi((batch) => received.push(...batch))
+    expect(midi.started).toBe(1)
+    const up: MidiEvent = { kind: 'off', note: 60, velocity: 0, timeUs: 20 }
+    midi.callback?.([keyDown, up])
+    expect(received).toEqual([keyDown, up])
+  })
+
+  it('never lets an error from the caller reach the piano side', () => {
+    const midi = fakeMidi()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...midi } })
+    c.startMidi(() => {
+      throw new Error('Screen gone.')
+    })
+    expect(() => midi.callback?.([keyDown])).not.toThrow()
+  })
+
+  it('stops the piano and lets go of the callback', () => {
+    const midi = fakeMidi()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...midi } })
+    c.startMidi(() => {})
+    c.stopMidi()
+    expect(midi.stopped).toBe(1)
+    expect(midi.callback).toBeUndefined()
+  })
+
+  it('asks the engine to reconnect and says ok', () => {
+    const midi = fakeMidi()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...midi } })
+    expect(c.reconnectMidi()).toEqual({ ok: true })
+    expect(midi.reconnects).toBe(1)
+  })
+
+  it('turns an error from the piano side into a plain reply', () => {
+    const c = createAudioController({
+      engine: {
+        ...fakeEngine(),
+        ...fakeMidi({
+          midiStatus: () => {
+            throw new Error('Broken.')
+          }
+        })
+      }
+    })
+    expect(c.midiStatus()).toEqual({ ok: false, error: 'Broken.' })
   })
 })

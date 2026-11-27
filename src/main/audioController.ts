@@ -2,6 +2,10 @@ import type {
   AudioState,
   EngineStatus,
   ListOutputsReply,
+  MidiEvent,
+  MidiReconnectReply,
+  MidiStatus,
+  MidiStatusReply,
   OutputDevice,
   StartConfig,
   StartResult,
@@ -19,15 +23,28 @@ export type Engine = {
   status(): EngineStatus
 }
 
+// The piano part of the native addon. It is optional: an older addon without it still
+// lets sound work, and the Sound screen says the piano part is missing.
+export type MidiEngine = {
+  startMidi(): void
+  stopMidi(): void
+  reconnectMidi(): void
+  midiStatus(): MidiStatus
+  onMidiEvent(callback: (events: MidiEvent[]) => void): void
+}
+
+export type FullEngine = Engine & Partial<MidiEngine>
+
 function reason(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
 // Keeps the last start result or error so the Sound screen can ask for it at any time.
 // It never throws to its callers: every answer is data. It does no sound work itself.
-export function createAudioController(source: { engine?: Engine; loadError?: string }) {
+export function createAudioController(source: { engine?: FullEngine; loadError?: string }) {
   const engine = source.engine
   const missing = source.loadError ?? 'The sound engine is not available.'
+  const midiMissing = 'The piano part of the sound engine is not available.'
   let current: AudioState = { phase: 'off' }
 
   return {
@@ -85,6 +102,52 @@ export function createAudioController(source: { engine?: Engine; loadError?: str
         return { ok: true, status: engine.status() }
       } catch (error) {
         return { ok: false, error: reason(error, 'The sound status could not be read.') }
+      }
+    },
+
+    // Starts the piano watcher and sends each batch of key events to `onBatch`.
+    // The callback runs on the main process; a throw in `onBatch` is caught here.
+    startMidi(onBatch: (events: MidiEvent[]) => void): void {
+      if (!engine || typeof engine.startMidi !== 'function' || typeof engine.onMidiEvent !== 'function') return
+      try {
+        engine.startMidi()
+        engine.onMidiEvent((events) => {
+          try {
+            onBatch(events)
+          } catch (error) {
+            console.error('A piano event could not be passed on:', error)
+          }
+        })
+      } catch (error) {
+        console.error('The piano could not be started:', error)
+      }
+    },
+
+    stopMidi(): void {
+      if (!engine || typeof engine.stopMidi !== 'function') return
+      try {
+        engine.stopMidi()
+      } catch (error) {
+        console.error('The piano did not stop cleanly:', error)
+      }
+    },
+
+    midiStatus(): MidiStatusReply {
+      if (!engine || typeof engine.midiStatus !== 'function') return { ok: false, error: midiMissing }
+      try {
+        return { ok: true, status: engine.midiStatus() }
+      } catch (error) {
+        return { ok: false, error: reason(error, 'The piano status could not be read.') }
+      }
+    },
+
+    reconnectMidi(): MidiReconnectReply {
+      if (!engine || typeof engine.reconnectMidi !== 'function') return { ok: false, error: midiMissing }
+      try {
+        engine.reconnectMidi()
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: reason(error, 'The piano could not be reconnected.') }
       }
     }
   }

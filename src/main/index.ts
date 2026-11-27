@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { isAppUrl } from './appUrl'
 import { loadEngine } from './audio'
 import { createAudioController } from './audioController'
-import { registerAudioIpc } from './ipc'
+import { registerAudioIpc, sendMidiEvents } from './ipc'
 
 // These three are for development and the screenshot script only.
 // A packaged app ignores them, so nobody can steer an installed app with them.
@@ -141,6 +141,8 @@ if (!app.requestSingleInstanceLock()) {
       // Open the sound output after the window exists, so it never delays the window.
       // The result (or the reason it failed) is kept for the Sound screen.
       void audio.start({})
+      // Start the piano watcher after the window exists. Key events go to the screen as they come.
+      audio.startMidi(sendMidiEvents(() => mainWindow))
     })
     .catch((error: unknown) => {
       console.error('The app could not start:', error)
@@ -149,6 +151,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('before-quit', () => {
+  audio.stopMidi()
   audio.stop()
 })
 

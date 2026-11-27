@@ -4,7 +4,7 @@ Tags: (B) builder, (B+) builder-plus, (L) lead. `hard` steps go straight to buil
 
 ## Tasks
 - [x] Rust audio engine loaded into the app, WASAPI exclusive and ASIO output, test tone (B+, hard)
-- [ ] MIDI input in the engine: P-121 found, notes, velocity, sustain pedal (B+, hard)
+- [x] MIDI input in the engine: P-121 found, notes, velocity, sustain pedal (B+, hard)
 - [ ] Sampled grand piano in memory, velocity layers, pedal (B+, hard)
 - [ ] Local Control off on start, restored on exit (B+)
 - [ ] Latency test and report, target under 10 ms (B+, hard)

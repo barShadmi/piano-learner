@@ -41,3 +41,4 @@ Acceptance: `npm test`, `npm run lint`, `npm run build`, `xvfb-run -a npm run te
 | --- | --- | --- | --- |
 | 1 | builder-plus (Sonnet) | 2 | FAIL (same-callback tap silent), then PASS. Later (task 3): a re-press also fades same-note voices already in release; headroom/limiter with the sampler. |
 | 2 | builder-plus (Sonnet) | 1 + follow-ups | PASS, follow-ups PASS (open by name, error in status, reconnectMidi, forwarder wake, split drop counters). Untested here: real MIDI port and JS delivery (no ports in the cloud); checked at Bar's gate. |
+| 3 | builder (Haiku) | 1 | PASS. Lead: removed a redundant 44 px class, skip sends to a destroyed page. |

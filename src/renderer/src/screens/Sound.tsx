@@ -1,7 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import type { AudioState } from '../../../shared/audio'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AudioState, MidiEvent, MidiStatusReply } from '../../../shared/audio'
 import styles from './Sound.module.css'
-import { backendWords, statusLine } from './soundText'
+import {
+  backendWords,
+  lastKeyLine,
+  latestKeyDown,
+  pianoLine,
+  pianoProblem,
+  statusLine
+} from './soundText'
 
 // Words and a shape for each phase, so colour is never the only signal.
 const badge = {
@@ -15,6 +22,41 @@ export default function Sound() {
   const [state, setState] = useState<AudioState>({ phase: 'starting' })
   const [beep, setBeep] = useState('')
   const busy = useRef(false)
+  // undefined until the first answer from the main process.
+  const [piano, setPiano] = useState<MidiStatusReply | undefined>(undefined)
+  const [lastKey, setLastKey] = useState<MidiEvent | undefined>(undefined)
+
+  const askPiano = useCallback(() => {
+    window.pianoLearner.midi.status().then(
+      (reply) => setPiano(reply),
+      () => setPiano({ ok: false, error: 'The piano did not answer.' })
+    )
+  }, [])
+
+  // Check the piano now, and again every 2 seconds so a plugged-in piano shows up by itself.
+  useEffect(() => {
+    askPiano()
+    const timer = setInterval(askPiano, 2000)
+    return () => clearInterval(timer)
+  }, [askPiano])
+
+  // Key presses for the "Last key" line. The sound itself never comes through here.
+  useEffect(() => {
+    return window.pianoLearner.midi.onEvents((events) => {
+      const key = latestKeyDown(events)
+      if (key) setLastKey(key)
+    })
+  }, [])
+
+  const reconnectPiano = () => {
+    window.pianoLearner.midi.reconnect().then(
+      (reply) => {
+        if (reply.ok) askPiano()
+        else setPiano(reply)
+      },
+      () => setPiano({ ok: false, error: 'The piano did not answer.' })
+    )
+  }
 
   // Ask the main process what sound is doing now.
   useEffect(() => {
@@ -80,6 +122,10 @@ export default function Sound() {
 
   const canPlay = state.phase === 'on'
   const result = state.result
+  const connected = piano?.ok === true && piano.status.connected
+  const pianoBadge = piano === undefined ? 'Checking' : connected ? 'Connected' : 'Not found'
+  const pianoGlyph = piano === undefined ? '…' : connected ? '✓' : '○'
+  const problem = pianoProblem(piano)
 
   return (
     <main className={styles.screen}>
@@ -132,6 +178,26 @@ export default function Sound() {
             Start sound
           </button>
         ) : null}
+      </section>
+
+      <section className={styles.panel} aria-labelledby="piano-title">
+        <h2 className={styles.sectionTitle} id="piano-title">
+          Piano
+        </h2>
+        <p className={`${styles.badge} ${connected ? styles.on : ''}`}>
+          <span aria-hidden="true" className={styles.glyph}>
+            {pianoGlyph}
+          </span>
+          {pianoBadge}
+        </p>
+        <p className={styles.statusLine} role="status">
+          {pianoLine(piano)}
+        </p>
+        {problem ? <p className={styles.reason}>Piano problem: {problem}</p> : null}
+        <p className={styles.note}>{lastKeyLine(lastKey)}</p>
+        <button type="button" className="button" onClick={reconnectPiano}>
+          Reconnect piano
+        </button>
       </section>
 
       <section className={styles.panel} aria-labelledby="test-title">
