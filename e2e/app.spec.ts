@@ -147,6 +147,30 @@ test('the Sound screen opens from the library, says sound state, and goes back',
   }
 })
 
+test('the Play screen opens from the library, shows 88 keys, and goes back by keyboard', async () => {
+  const app = await launch()
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+
+    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await expect(window.getByRole('heading', { name: 'Play', level: 1 })).toBeVisible()
+
+    await expect(window.getByRole('img', { name: 'Piano keyboard' })).toBeVisible()
+    await expect(window.locator('[data-note]')).toHaveCount(88)
+    await expect(window.getByText('No keys down.')).toBeVisible()
+
+    // Keyboard only: the first Tab stop on this screen is the way back.
+    await window.keyboard.press('Tab')
+    const back = window.getByRole('link', { name: 'Back to your songs' })
+    await expect(back).toBeFocused()
+    await window.keyboard.press('Enter')
+    await expect(window.getByRole('heading', { name: 'Your songs' })).toBeVisible()
+  } finally {
+    await app.close()
+  }
+})
+
 test('the Delay test opens from Sound, says there is no piano, and saves a report', async () => {
   const app = await launch()
   try {

@@ -5,7 +5,7 @@ Goal: Bar sees a full 88-key piano on screen, and every key he presses on the P-
 Decisions (lead):
 - A new **Play** screen (`#/play`, title "Play"), opened from the library with a "Play the piano" link next to "Sound". Header: title and "Back to your songs". Under it, one status line about the piano ("Piano connected." / the existing not-found words from soundText). The keyboard sits at the bottom of the screen, full width. Space above it stays empty for now (falling notes go there in task 8).
 - Keys: MIDI 21 (A0) to 108 (C8): 52 white, 36 black. Drawn as DOM elements (one `div` per key, absolutely positioned from a pure layout function), not canvas, so they are easy to test and theme. Width fills the screen; height is about 5.5 × the white key width, capped so the keyboard is never taller than 30% of the window.
-- A pressed key has three signals, not colour alone: its fill changes (white key → `--surface-raised`, black key → `--text-muted`), it moves down 2 px (`translateY`), and a round ink dot (`--accent`) shows near its bottom edge. Hand colours are NOT used for keys Bar presses (blue and orange mean the song's hands only).
+- A pressed key has three signals, not colour alone: its fill changes to `--text-muted` on both white and black keys, it moves down 2 px (`translateY`), and a round dot (`--on-accent`: white on the grey in light theme, dark on the grey in dark theme) shows near its bottom edge. Hand colours are NOT used for keys Bar presses (blue and orange mean the song's hands only).
 - The component takes `lit: ReadonlyMap<number, 'pressed' | 'right' | 'left'>`. 'right' and 'left' fill with `--hand-right-soft` / `--hand-left-soft` plus a bottom bar in `--hand-right` / `--hand-left` and an "R" / "L" letter on white keys. Only 'pressed' is used in this task; the others are built and unit tested now for task 9.
 - Labels: every C gets its name under the keyboard (C1 … C8), and middle C (C4, MIDI 60) also gets a small "Middle C" label. Text uses `--text-muted`, `--text-sm`.
 - Pedal: a short line above the keyboard: "Pedal: down" / "Pedal: up", with a filled or empty circle glyph.
@@ -28,3 +28,4 @@ Acceptance: npm test, lint, typecheck, build, e2e pass; screenshots light and da
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
 | 1 | builder (Haiku) | 1 | PASS. allOff keeps the pedal (MIDI CC 123 does not release sustain). |
+| 2 | builder (Haiku) | 1 | PASS (lead changed the pressed colour after the first screenshots; forced-colours edges, bar and dot fixed by the lead from the verifier notes). |

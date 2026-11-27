@@ -28,6 +28,9 @@ export default function Library() {
           <a href="#/sound" className="button">
             Sound
           </a>
+          <a href="#/play" className="button">
+            Play the piano
+          </a>
         </div>
       </div>
       <section className={styles.panel} aria-labelledby="songs-title">

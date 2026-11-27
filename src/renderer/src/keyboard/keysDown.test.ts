@@ -38,6 +38,13 @@ describe('applyEvents', () => {
     expect(up.pedal).toBe(false)
   })
 
+  it('keeps the pedal down on "allOff", because CC 123 does not release sustain', () => {
+    const pedalDown = applyEvents(empty, [sustain(true)])
+    const cleared = applyEvents(pedalDown, [on(60), allOff])
+    expect(cleared.down.size).toBe(0)
+    expect(cleared.pedal).toBe(true)
+  })
+
   it('treats a repeated "on" as harmless', () => {
     const s = applyEvents(empty, [on(60), on(60)])
     expect([...s.down]).toEqual([60])

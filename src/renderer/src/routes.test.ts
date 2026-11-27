@@ -34,3 +34,14 @@ describe('screenFor latency', () => {
     expect(screenFor('#/latencies')).toBe('not-found')
   })
 })
+
+describe('screenFor play', () => {
+  it('shows the play screen for #/play', () => {
+    expect(screenFor('#/play')).toBe('play')
+  })
+
+  it('does not match look-alikes', () => {
+    expect(screenFor('#/plays')).toBe('not-found')
+    expect(screenFor('#/play/x')).toBe('not-found')
+  })
+})

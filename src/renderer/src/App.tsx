@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Latency from './screens/Latency'
 import Library from './screens/Library'
 import NotFound from './screens/NotFound'
+import Play from './screens/Play'
 import Sound from './screens/Sound'
 import { screenFor } from './routes'
 
@@ -18,5 +19,6 @@ export default function App() {
   if (screen === 'library') return <Library />
   if (screen === 'sound') return <Sound />
   if (screen === 'latency') return <Latency />
+  if (screen === 'play') return <Play />
   return <NotFound />
 }

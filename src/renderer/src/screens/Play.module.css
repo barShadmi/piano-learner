@@ -1,0 +1,50 @@
+.screen {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: var(--space-6);
+}
+
+@media (min-width: 1600px) {
+  .screen {
+    padding: var(--space-7);
+  }
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.title {
+  font-size: var(--text-2xl);
+  margin: 0;
+}
+
+.statusLine {
+  font-size: var(--text-lg);
+  color: var(--text);
+  margin: var(--space-5) 0 0;
+}
+
+/* The keyboard sits at the bottom of the screen. Space above it is left empty for falling notes. */
+.bottom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: auto;
+}
+
+.pedal,
+.keysDown {
+  font-size: var(--text-md);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.glyph {
+  margin-right: var(--space-2);
+}

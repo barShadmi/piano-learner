@@ -12,7 +12,7 @@ const LAST = 108 // C8
 
 // Applies a batch of events. Returns the same object when nothing changed.
 export function applyEvents(state: KeysState, events: readonly MidiEvent[]): KeysState {
-  // Work on a copy only when a change happens, so unchanged input keeps its identity.
+  // Always work on a copy of the set. If nothing ends up changed, the old set and state are returned instead.
   const next = new Set(state.down)
   let pedal = state.pedal
 
