@@ -113,7 +113,7 @@ export function setupRows(summary: LatencySummary): Row[] {
 export function reportText(summary: LatencySummary, now: Date): string {
   const lines = ['PianoLearner delay test', `Saved at: ${now.toISOString()}`, '']
   if (summary.count === 0) {
-    lines.push('No keys have been timed yet. Play the piano, then save the report again.')
+    lines.push('No keys have been timed yet. Play some keys, then save the report again.')
   } else if (summary.count < KEYS_NEEDED) {
     lines.push(`Only ${summary.count} of ${KEYS_NEEDED} keys timed so far.`)
   } else {

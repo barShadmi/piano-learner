@@ -39,6 +39,7 @@
   margin: var(--space-4) 0 0;
   font-size: var(--text-md);
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .list {
