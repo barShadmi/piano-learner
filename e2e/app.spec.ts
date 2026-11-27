@@ -585,7 +585,7 @@ test('at the smallest window the falling notes area is at least 240 px tall', as
     })
     expect(lines).toBeLessThanOrEqual(1)
     const back = await window.getByRole('link', { name: 'Back to your songs' }).boundingBox()
-    expect(back!.height).toBeLessThan(80)
+    expect(back!.height).toBeLessThan(56)
     const area = (): Promise<number> =>
       window.locator('[data-frames]').evaluate((el) => el.getBoundingClientRect().height)
     const idle = await area()
