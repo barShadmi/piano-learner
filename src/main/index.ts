@@ -142,11 +142,11 @@ if (!app.requestSingleInstanceLock()) {
       })
 
       if (app.isPackaged) Menu.setApplicationMenu(null)
-      registerAudioIpc(audio)
       // The saved sound settings (defaults when there is no file). Read once here, in the main process.
       const settingsFolder = app.getPath('userData')
       const settings = loadSettings(settingsFolder)
-      registerSettingsIpc(audio, settingsFolder, settings)
+      const currentSettings = registerSettingsIpc(audio, settingsFolder, settings)
+      registerAudioIpc(audio, currentSettings)
       createWindow()
       // Open the sound output after the window exists, so it never delays the window.
       // The result (or the reason it failed) is kept for the Sound screen. The saved volume

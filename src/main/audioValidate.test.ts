@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { parseStartConfig, parseToneArgs } from './audioValidate'
+import { parseStartConfig, parseToneArgs, parseVolume } from './audioValidate'
+
+describe('parseVolume', () => {
+  it('accepts a number from 0 to 1', () => {
+    expect(parseVolume(0)).toEqual({ ok: true, value: 0 })
+    expect(parseVolume(0.35)).toEqual({ ok: true, value: 0.35 })
+    expect(parseVolume(1)).toEqual({ ok: true, value: 1 })
+  })
+
+  it('rejects anything else, in plain words', () => {
+    for (const bad of [-0.1, 1.5, NaN, Infinity, '0.5', undefined, null, true]) {
+      const parsed = parseVolume(bad)
+      expect(parsed.ok).toBe(false)
+      if (!parsed.ok) expect(parsed.error).toBe('The volume must be a number from 0 to 1.')
+    }
+  })
+})
 
 describe('parseStartConfig', () => {
   it('accepts nothing at all as the defaults', () => {

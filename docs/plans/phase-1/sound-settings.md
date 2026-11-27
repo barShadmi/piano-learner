@@ -23,3 +23,4 @@ Acceptance: npm test, lint, build, e2e pass; screenshots light and dark.
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
 | 1 | builder (Haiku) | 2 | FAIL (a settings change during a start was lost), then PASS. Also added: a missing saved output falls back to the default with a note; settings:set refuses non-objects. |
+| 2 | builder (Haiku), then builder-plus (Sonnet) | 3 | FAIL (Try again ignored saved settings; busy-mode wording missing), FAIL (retry could replay old settings; save reply undid a volume drag), then PASS. Volume now sets live and saves on release. |

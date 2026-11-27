@@ -1,4 +1,4 @@
-import type { AudioState, MidiEvent, MidiStatusReply, PianoSound } from '../../../shared/audio'
+import type { AudioState, Backend, MidiEvent, MidiStatusReply, OutputDevice, PianoSound } from '../../../shared/audio'
 
 // The way sound is played, in words a beginner can read.
 export function backendWords(backend: string): string {
@@ -36,6 +36,14 @@ export function statusLine(state: AudioState): string {
 }
 
 const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+
+// The line under a sound that fell back to another mode. It names the mode the sound uses now.
+export function fallbackLine(backend: string): string {
+  if (backend === 'wasapi-shared') {
+    return 'Exclusive mode is busy, so the app is using shared mode. Close other apps that use sound and press Try again.'
+  }
+  return `Exclusive mode did not work, so the app is using ${backendWords(backend)}. Close other apps that use sound and press Try again.`
+}
 
 // The name of a key, like C4 for middle C (MIDI 60). Anything that is not a MIDI note gives '?'.
 export function noteName(note: number): string {
@@ -105,3 +113,61 @@ export function localControlLine(reply: MidiStatusReply | undefined): string | u
 // The tip for when the sound is heard twice (the piano's speakers are still on).
 export const LOCAL_CONTROL_TIP =
   'If you hear the sound twice, hold METRONOME and RHYTHM on the piano and press the C5 key.'
+
+// The name of a sound mode in the Mode list, in plain words.
+export function modeLabel(backend: Backend): string {
+  switch (backend) {
+    case 'wasapi-exclusive':
+      return 'Fastest (exclusive)'
+    case 'wasapi-shared':
+      return 'Shared with other apps'
+    case 'asio':
+      return 'ASIO driver'
+    case 'cpal':
+      return 'Standard mode'
+  }
+}
+
+// The modes to offer, in a fixed order: only those the outputs list has, plus the saved one.
+const modeOrder: readonly Backend[] = ['wasapi-exclusive', 'wasapi-shared', 'asio', 'cpal']
+
+export function modeChoices(outputs: readonly OutputDevice[], current: Backend): Backend[] {
+  const listed = new Set<string>(outputs.map((output) => output.backend))
+  return modeOrder.filter((backend) => listed.has(backend) || backend === current)
+}
+
+// The buffer size with its time, at 48000 Hz (samples divided by 48 gives milliseconds).
+export function bufferLabel(frames: number): string {
+  const ms = frames / 48
+  return `${frames} samples, about ${ms.toFixed(1)} ms`
+}
+
+// The device name in the Output list. A headphone device is marked, so Bar can find his headphones.
+export function outputLabel(name: string): string {
+  return /headphone/i.test(name) ? `${name} (headphones)` : name
+}
+
+// The two WASAPI modes share one list of devices, so they count as one family.
+export function outputFamily(backend: string): string {
+  return backend.startsWith('wasapi') ? 'wasapi' : backend
+}
+
+// The Output list for a mode: the Windows default first, then each device of that mode once.
+// A saved device that is not listed is kept as its own choice, so the screen does not hide it.
+export function outputChoices(
+  outputs: readonly OutputDevice[],
+  backend: Backend,
+  savedId?: string
+): { value: string; label: string }[] {
+  const seen = new Set<string>()
+  const choices = [{ value: '', label: 'Windows default output' }]
+  for (const output of outputs) {
+    if (outputFamily(output.backend) !== outputFamily(backend) || seen.has(output.id)) continue
+    seen.add(output.id)
+    choices.push({ value: output.id, label: outputLabel(output.name) })
+  }
+  if (savedId !== undefined && !seen.has(savedId)) {
+    choices.push({ value: savedId, label: 'Saved output (not connected)' })
+  }
+  return choices
+}

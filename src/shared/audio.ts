@@ -57,6 +57,7 @@ export type AudioState = {
 
 export type ListOutputsReply = { ok: true; outputs: OutputDevice[] } | { ok: false; error: string }
 export type TestToneReply = { ok: true } | { ok: false; error: string }
+export type VolumeReply = { ok: true } | { ok: false; error: string }
 export type StatusReply = { ok: true; status: EngineStatus } | { ok: false; error: string }
 
 // Piano (MIDI) shapes. They mirror what the native engine reports.

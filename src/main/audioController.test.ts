@@ -606,6 +606,36 @@ describe('createAudioController settings', () => {
     expect((await c.applySettings(saved)).phase).toBe('on')
   })
 
+  it('a retry after a failure starts again with the saved buffer, even when the settings are the same', async () => {
+    let attempt = 0
+    const engine = fakeMixEngine({
+      start: async (config?: StartConfig) => {
+        engine.starts.push(config)
+        attempt++
+        if (attempt === 1) throw new Error('Device busy.')
+        return goodResult
+      }
+    })
+    const c = createAudioController({ engine })
+    expect((await c.applySettings({ ...saved, bufferFrames: 256 })).phase).toBe('failed')
+    expect((await c.retry({ ...saved, bufferFrames: 256 })).phase).toBe('on')
+    expect(engine.starts.map((config) => config?.bufferFrames)).toEqual([256, 256])
+  })
+
+  it('a retry starts sound again even when it is already on a fallback mode', async () => {
+    const engine = fakeMixEngine({
+      start: async (config?: StartConfig) => {
+        engine.starts.push(config)
+        return { ...goodResult, backend: 'wasapi-shared', fallbackReason: 'Exclusive mode is busy.' }
+      }
+    })
+    const c = createAudioController({ engine })
+    await c.applySettings(saved)
+    await c.retry(saved)
+    expect(engine.starts.length).toBe(2)
+    expect(engine.starts[1]?.backend).toBe('wasapi-exclusive')
+  })
+
   it('applies the volume once sound is on', async () => {
     const engine = fakeMixEngine()
     const c = createAudioController({ engine })
@@ -679,6 +709,25 @@ describe('createAudioController settings that change while a start is opening', 
     expect(final.phase).toBe('on')
     expect(final.result?.bufferFrames).toBe(256)
     expect(engine.volumes).toEqual([0.2])
+  })
+
+  it('a retry queued behind a running pass never replays old settings over a newer change', async () => {
+    const listReleases: Array<(o: ReturnType<typeof output>[]) => void> = []
+    const engine = fakeMixEngine({
+      listOutputs: () => new Promise((r) => listReleases.push(r))
+    })
+    const c = createAudioController({ engine })
+    const withDevice = { ...saved, deviceId: 'A' }
+    const first = c.applySettings(withDevice)
+    await settle()
+    const retried = c.retry(withDevice)
+    const newer = c.applySettings({ ...withDevice, bufferFrames: 256 })
+    for (let i = 0; i < 10; i++) {
+      while (listReleases.length) listReleases.shift()?.([output('A')])
+      await settle()
+    }
+    await Promise.all([first, retried, newer])
+    expect(engine.starts[engine.starts.length - 1]?.bufferFrames).toBe(256)
   })
 
   it('does not restart again when the newest settings match what is already running', async () => {

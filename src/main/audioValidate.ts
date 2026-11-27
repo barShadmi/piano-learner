@@ -45,6 +45,12 @@ export function parseStartConfig(input: unknown): Parsed<StartConfig> {
   return { ok: true, value }
 }
 
+// The volume from the slider: a number from 0 to 1.
+export function parseVolume(input: unknown): Parsed<number> {
+  if (!isNumberIn(input, 0, 1)) return { ok: false, error: 'The volume must be a number from 0 to 1.' }
+  return { ok: true, value: input }
+}
+
 // Arguments for the test sound: pitch in Hz and length in seconds.
 export function parseToneArgs(input: unknown): Parsed<ToneArgs> {
   if (input === undefined || input === null) return { ok: true, value: {} }

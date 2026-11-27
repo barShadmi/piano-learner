@@ -99,6 +99,8 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
   // The newest settings Bar wants, and the pass that is working towards them (if any).
   let wanted: SoundSettings | undefined
   let applying: Promise<AudioState> | undefined
+  // Set by retry: the next settle step starts sound even when the running sound matches. Read once, then cleared.
+  let forceRestart = false
   // Set when the saved output was not found and the default output is used. Cleared by the next settings change.
   let settingsNote: string | undefined
 
@@ -185,10 +187,12 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
       if (pendingStart) await pendingStart
       if (target !== wanted) continue
       settingsNote = note
-      if (current.phase !== 'on' || !sameStart(runningConfig, config)) {
+      const force = forceRestart
+      forceRestart = false
+      if (force || current.phase !== 'on' || !sameStart(runningConfig, config)) {
         await start(config)
       }
-      if (target === wanted) break
+      if (target === wanted && !forceRestart) break
     }
     setVolume(target.volume)
     setPianoSpeakers(target.pianoSpeakers)
@@ -213,6 +217,18 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
     } catch (error) {
       console.error('The piano speakers could not be set:', error)
     }
+  }
+
+  // Applies the saved settings. Sound restarts only when the output, mode or buffer differ from
+  // the running sound (or no sound is on). Volume and the piano speakers apply once it settles.
+  // Settings sent while a start is opening are not lost: the newest ones are applied after it.
+  const applySettings = (next: SoundSettings): Promise<AudioState> => {
+    wanted = next
+    if (applying) return applying
+    applying = settlePass().finally(() => {
+      applying = undefined
+    })
+    return applying
   }
 
   return {
@@ -248,16 +264,15 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
 
     start,
 
-    // Applies the saved settings. Sound restarts only when the output, mode or buffer differ from
-    // the running sound (or no sound is on). Volume and the piano speakers apply once it settles.
-    // Settings sent while a start is opening are not lost: the newest ones are applied after it.
-    applySettings(next: SoundSettings): Promise<AudioState> {
-      wanted = next
+    applySettings,
+
+    // Try again: starts sound with these settings even when they match the running sound
+    // (a failed start, or a fallback mode). While a pass is running it only asks that pass for a
+    // start: the pass already works towards the newest settings, which must not be replaced by older ones.
+    retry(next: SoundSettings): Promise<AudioState> {
+      forceRestart = true
       if (applying) return applying
-      applying = settlePass().finally(() => {
-        applying = undefined
-      })
-      return applying
+      return applySettings(next)
     },
 
     setVolume,

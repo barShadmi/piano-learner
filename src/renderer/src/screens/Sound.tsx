@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AudioState, MidiEvent, MidiStatusReply } from '../../../shared/audio'
 import styles from './Sound.module.css'
+import SoundSettings from './SoundSettings'
 import {
-  backendWords,
+  fallbackLine,
   lastKeyLine,
   latestKeyDown,
   LOCAL_CONTROL_TIP,
@@ -175,10 +176,15 @@ export default function Sound() {
         </p>
 
         {state.phase === 'on' && result?.fallbackReason ? (
-          <p className={styles.note}>
-            Exclusive mode did not work, so sound uses {backendWords(result.backend)} instead.
-            Reason: {result.fallbackReason}
-          </p>
+          <>
+            <p className={styles.note}>{fallbackLine(result.backend)}</p>
+            <p className={styles.reason}>
+              <strong>Reason:</strong> {result.fallbackReason}
+            </p>
+            <button type="button" className="button" onClick={startSound}>
+              Try again
+            </button>
+          </>
         ) : null}
 
         {state.phase === 'failed' ? (
@@ -201,6 +207,8 @@ export default function Sound() {
           </button>
         ) : null}
       </section>
+
+      <SoundSettings settingsNote={state.settingsNote} onState={setState} />
 
       <section className={styles.panel} aria-labelledby="piano-title">
         <h2 className={styles.sectionTitle} id="piano-title">
