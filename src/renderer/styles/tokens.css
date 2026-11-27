@@ -1,0 +1,101 @@
+/* Design tokens. The only place colours are written down.
+   Light is the default on :root. Dark overrides colours only. */
+
+:root {
+  color-scheme: light;
+  /* Surfaces and text (light) */
+  --bg: #f6f5f1;
+  --surface: #ffffff;
+  --surface-raised: #eeece6;
+  --border: #cfcdc5;
+  --text: #1c1b19;
+  --text-muted: #5c5a54;
+
+  /* Accent */
+  --accent: #1d4ed8;
+  --on-accent: #ffffff;
+
+  /* Hands: blue family (right) and orange family (left) */
+  --hand-right: #1d4ed8;
+  --hand-left: #c2410c;
+  --hand-right-soft: #dbe7fb;
+  --hand-left-soft: #fbe3d2;
+
+  /* Feedback */
+  --correct: #15803d;
+  --correct-soft: #dcf3e3;
+  --wrong: #b91c1c;
+  --wrong-soft: #fbe0e0;
+
+  /* Keyboard */
+  --key-white: #ffffff;
+  --key-black: #1c1b19;
+  --key-border: #b9b7ae;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+
+  /* Radii */
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --radius-3: 12px;
+  --radius-4: 16px;
+  --radius-5: 24px;
+  --radius-full: 9999px;
+
+  /* Type */
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --leading: 1.45;
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #111114;
+  --surface: #1a1a1f;
+  --surface-raised: #24242b;
+  --border: #3a3a44;
+  --text: #f0efeb;
+  --text-muted: #a9a8b2;
+
+  --accent: #8ab4ff;
+  --on-accent: #0d1530;
+
+  --hand-right: #6ea8ff;
+  --hand-left: #ff9f5a;
+  --hand-right-soft: #1e2a44;
+  --hand-left-soft: #3a2818;
+
+  --correct: #4ade80;
+  --correct-soft: #17331f;
+  --wrong: #f87171;
+  --wrong-soft: #3a1c1c;
+
+  --key-white: #e9e8e4;
+  --key-black: #0c0c0f;
+  --key-border: #4a4a55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+  }
+}
