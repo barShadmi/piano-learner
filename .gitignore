@@ -1,0 +1,15 @@
+node_modules
+out
+dist
+release
+.env*
+*.log
+test-results
+playwright-report
+screens-out
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+.claude/settings.local.json

@@ -1,0 +1,589 @@
+{
+  "formatVersion": 1,
+  "id": "canon-opening",
+  "title": "Canon in D (opening)",
+  "composer": "Johann Pachelbel",
+  "keyFifths": 2,
+  "measures": [
+    {
+      "index": 0,
+      "start": 0,
+      "timeSignature": {
+        "beats": 4,
+        "beatUnit": 4
+      }
+    },
+    {
+      "index": 1,
+      "start": 4,
+      "timeSignature": {
+        "beats": 4,
+        "beatUnit": 4
+      }
+    },
+    {
+      "index": 2,
+      "start": 8,
+      "timeSignature": {
+        "beats": 4,
+        "beatUnit": 4
+      }
+    },
+    {
+      "index": 3,
+      "start": 12,
+      "timeSignature": {
+        "beats": 4,
+        "beatUnit": 4
+      }
+    },
+    {
+      "index": 4,
+      "start": 16,
+      "timeSignature": {
+        "beats": 4,
+        "beatUnit": 4
+      }
+    },
+    {
+      "index": 5,
+      "start": 20,
+      "timeSignature": {
+        "beats": 4,
+        "beatUnit": 4
+      }
+    },
+    {
+      "index": 6,
+      "start": 24,
+      "timeSignature": {
+        "beats": 4,
+        "beatUnit": 4
+      }
+    },
+    {
+      "index": 7,
+      "start": 28,
+      "timeSignature": {
+        "beats": 4,
+        "beatUnit": 4
+      }
+    }
+  ],
+  "tempos": [
+    {
+      "start": 0,
+      "bpm": 100
+    }
+  ],
+  "notes": [
+    {
+      "id": "lh-1-1",
+      "pitch": 50,
+      "start": 0,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-1-2",
+      "pitch": 57,
+      "start": 0.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-1-3",
+      "pitch": 62,
+      "start": 1,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-1-4",
+      "pitch": 66,
+      "start": 1.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-1-5",
+      "pitch": 45,
+      "start": 2,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-1-6",
+      "pitch": 52,
+      "start": 2.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-1-7",
+      "pitch": 57,
+      "start": 3,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-1-8",
+      "pitch": 61,
+      "start": 3.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-2-1",
+      "pitch": 47,
+      "start": 4,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-2-2",
+      "pitch": 54,
+      "start": 4.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-2-3",
+      "pitch": 59,
+      "start": 5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-2-4",
+      "pitch": 62,
+      "start": 5.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-2-5",
+      "pitch": 42,
+      "start": 6,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-2-6",
+      "pitch": 49,
+      "start": 6.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-2-7",
+      "pitch": 54,
+      "start": 7,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-2-8",
+      "pitch": 57,
+      "start": 7.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-3-1",
+      "pitch": 43,
+      "start": 8,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-3-2",
+      "pitch": 50,
+      "start": 8.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-3-3",
+      "pitch": 55,
+      "start": 9,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-3-4",
+      "pitch": 59,
+      "start": 9.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-3-5",
+      "pitch": 38,
+      "start": 10,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-3-6",
+      "pitch": 45,
+      "start": 10.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-3-7",
+      "pitch": 50,
+      "start": 11,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-3-8",
+      "pitch": 54,
+      "start": 11.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-4-1",
+      "pitch": 43,
+      "start": 12,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-4-2",
+      "pitch": 50,
+      "start": 12.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-4-3",
+      "pitch": 55,
+      "start": 13,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-4-4",
+      "pitch": 59,
+      "start": 13.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-4-5",
+      "pitch": 45,
+      "start": 14,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-4-6",
+      "pitch": 52,
+      "start": 14.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-4-7",
+      "pitch": 57,
+      "start": 15,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-4-8",
+      "pitch": 61,
+      "start": 15.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-5-1",
+      "pitch": 50,
+      "start": 16,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-5-2",
+      "pitch": 57,
+      "start": 16.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-5-3",
+      "pitch": 62,
+      "start": 17,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-5-4",
+      "pitch": 66,
+      "start": 17.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-5-5",
+      "pitch": 45,
+      "start": 18,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-5-6",
+      "pitch": 52,
+      "start": 18.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-5-7",
+      "pitch": 57,
+      "start": 19,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-5-8",
+      "pitch": 61,
+      "start": 19.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-6-1",
+      "pitch": 47,
+      "start": 20,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-6-2",
+      "pitch": 54,
+      "start": 20.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-6-3",
+      "pitch": 59,
+      "start": 21,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-6-4",
+      "pitch": 62,
+      "start": 21.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-6-5",
+      "pitch": 42,
+      "start": 22,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-6-6",
+      "pitch": 49,
+      "start": 22.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-6-7",
+      "pitch": 54,
+      "start": 23,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-6-8",
+      "pitch": 57,
+      "start": 23.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-7-1",
+      "pitch": 43,
+      "start": 24,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-7-2",
+      "pitch": 50,
+      "start": 24.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-7-3",
+      "pitch": 55,
+      "start": 25,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-7-4",
+      "pitch": 59,
+      "start": 25.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-7-5",
+      "pitch": 38,
+      "start": 26,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-7-6",
+      "pitch": 45,
+      "start": 26.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-7-7",
+      "pitch": 50,
+      "start": 27,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-7-8",
+      "pitch": 54,
+      "start": 27.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-8-1",
+      "pitch": 43,
+      "start": 28,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-8-2",
+      "pitch": 50,
+      "start": 28.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-8-3",
+      "pitch": 55,
+      "start": 29,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-8-4",
+      "pitch": 59,
+      "start": 29.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-8-5",
+      "pitch": 45,
+      "start": 30,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-8-6",
+      "pitch": 52,
+      "start": 30.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-8-7",
+      "pitch": 57,
+      "start": 31,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "lh-8-8",
+      "pitch": 61,
+      "start": 31.5,
+      "duration": 0.5,
+      "hand": "left"
+    },
+    {
+      "id": "rh-5-1",
+      "pitch": 78,
+      "start": 16,
+      "duration": 2,
+      "hand": "right"
+    },
+    {
+      "id": "rh-5-2",
+      "pitch": 76,
+      "start": 18,
+      "duration": 2,
+      "hand": "right"
+    },
+    {
+      "id": "rh-6-1",
+      "pitch": 74,
+      "start": 20,
+      "duration": 2,
+      "hand": "right"
+    },
+    {
+      "id": "rh-6-2",
+      "pitch": 73,
+      "start": 22,
+      "duration": 2,
+      "hand": "right"
+    },
+    {
+      "id": "rh-7-1",
+      "pitch": 71,
+      "start": 24,
+      "duration": 2,
+      "hand": "right"
+    },
+    {
+      "id": "rh-7-2",
+      "pitch": 69,
+      "start": 26,
+      "duration": 2,
+      "hand": "right"
+    },
+    {
+      "id": "rh-8-1",
+      "pitch": 71,
+      "start": 28,
+      "duration": 2,
+      "hand": "right"
+    },
+    {
+      "id": "rh-8-2",
+      "pitch": 73,
+      "start": 30,
+      "duration": 2,
+      "hand": "right"
+    }
+  ],
+  "source": {
+    "kind": "sheet",
+    "fileName": "canon-in-d-johann-pachelbel.pdf"
+  }
+}
