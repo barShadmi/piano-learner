@@ -1,10 +1,13 @@
 //! Proves the audio path never allocates. The counting allocator is test-only.
 use audio_engine::core::{channel, Command, EngineCore, Mixer};
+use audio_engine::piano::{bank_link, Sample, SampleBank};
+use std::sync::Arc;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static ALLOCS: AtomicUsize = AtomicUsize::new(0);
+static FREES: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
     static ARMED: Cell<bool> = const { Cell::new(false) };
@@ -20,6 +23,9 @@ unsafe impl GlobalAlloc for Counting {
         System.alloc(l)
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        if ARMED.with(|a| a.get()) {
+            FREES.fetch_add(1, Ordering::SeqCst);
+        }
         System.dealloc(p, l)
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
@@ -93,4 +99,85 @@ fn process_never_allocates_with_note_commands_from_both_rings() {
     ARMED.with(|a| a.set(false));
 
     assert_eq!(ALLOCS.load(Ordering::SeqCst), 0, "audio path allocated");
+}
+
+/// A small bank: a sine on every minor third, four layers, each 0.3 s long.
+fn small_bank() -> SampleBank {
+    let mut v = Vec::new();
+    for layer in 0..4u8 {
+        let mut n = 21u8;
+        while n <= 108 {
+            let hz = 440.0 * 2f64.powf((f64::from(n) - 69.0) / 12.0);
+            let mut d = Vec::new();
+            for i in 0..14_400 {
+                let x = ((2.0 * std::f64::consts::PI * hz * f64::from(i) / 48_000.0).sin() * 12_000.0) as i16;
+                d.push(x);
+                d.push(x);
+            }
+            v.push(Sample::new(n, layer, 48_000, 2, d));
+            n += 3;
+        }
+    }
+    SampleBank::from_samples(v)
+}
+
+fn busy_notes(core: &mut EngineCore, midi_tx: &mut rtrb::Producer<Command>, out: &mut [f32], rounds: u32) {
+    for i in 0..rounds {
+        let note = 21 + (i % 88) as u8;
+        // More than 64 notes held at once forces stealing; the 0.3 s samples also run out by themselves.
+        let _ = midi_tx.push(Command::NoteOn { note, velocity: 1 + (i % 127) as u8 });
+        if i % 3 == 0 {
+            let _ = midi_tx.push(Command::NoteOff { note: 21 + ((i + 7) % 88) as u8 });
+        }
+        if i % 5 == 0 {
+            let _ = midi_tx.push(Command::NoteOn { note: 60, velocity: 90 }); // same note again
+        }
+        if i % 97 == 0 {
+            let _ = midi_tx.push(Command::Sustain(i % 2 == 0));
+        }
+        if i % 400 == 0 {
+            let _ = midi_tx.push(Command::AllNotesOff);
+        }
+        core.process(out);
+    }
+}
+
+#[test]
+fn process_never_allocates_with_a_piano_bank_set_on_the_mixer() {
+    let (_tx, rx) = channel(64);
+    let (mut midi_tx, midi_rx) = channel(256);
+    let mut mixer = Mixer::new(48_000, 2);
+    assert!(mixer.set_bank(Some(Arc::new(small_bank()))).is_none());
+    let mut core = EngineCore::with_midi(rx, midi_rx, mixer);
+    let mut out = vec![0.0f32; 2 * 128];
+
+    ARMED.with(|a| a.set(true));
+    busy_notes(&mut core, &mut midi_tx, &mut out, 3000);
+    ARMED.with(|a| a.set(false));
+
+    assert_eq!(ALLOCS.load(Ordering::SeqCst), 0, "audio path allocated");
+}
+
+#[test]
+fn process_neither_allocates_nor_frees_when_banks_arrive_through_the_ring() {
+    let (_tx, rx) = channel(64);
+    let (mut midi_tx, midi_rx) = channel(256);
+    let (mut sender, receiver) = bank_link(2);
+    let mut core = EngineCore::with_midi(rx, midi_rx, Mixer::new(48_000, 2)).with_bank_link(receiver);
+    let mut out = vec![0.0f32; 2 * 128];
+
+    // Stand-in notes are playing when the first bank arrives, piano notes when the second does.
+    let (first, second) = (Arc::new(small_bank()), Arc::new(small_bank()));
+    sender.send(Arc::clone(&first)).unwrap();
+    ARMED.with(|a| a.set(true));
+    busy_notes(&mut core, &mut midi_tx, &mut out, 200);
+    ARMED.with(|a| a.set(false));
+    sender.send(Arc::clone(&second)).unwrap();
+    ARMED.with(|a| a.set(true));
+    busy_notes(&mut core, &mut midi_tx, &mut out, 200);
+    ARMED.with(|a| a.set(false));
+
+    assert_eq!(ALLOCS.load(Ordering::SeqCst), 0, "audio path allocated");
+    assert_eq!(FREES.load(Ordering::SeqCst), 0, "audio path freed memory");
+    assert_eq!(sender.reclaim(), 1, "the replaced bank came back through the return ring");
 }
