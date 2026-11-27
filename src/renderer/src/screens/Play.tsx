@@ -185,7 +185,7 @@ function PlaySong({ song }: { song: Song }) {
     // Watch only: this always silences a Listen that is on or waiting to begin. The notes keep moving.
     stopListening()
     setActivity('watch')
-    // After the end, Start begins again from the lead-in.
+    // After the end, Watch begins again from the lead-in.
     if (clock.nowSeconds() >= endS) clock.seek(startS)
     clock.play(1)
   }, [activity, heard, clock, startS, endS, stopListening])
