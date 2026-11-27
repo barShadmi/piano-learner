@@ -29,8 +29,8 @@ const KeyView = memo(function KeyView({ k, lit }: { k: KeyLayout; lit: KeyLit | 
       data-state={state}
       style={{ left: percent(k.x), width: percent(k.width) }}
     >
-      {hand ? <span className={styles.bar} /> : null}
-      {hand && !k.black ? <span className={styles.letter}>{hand === 'right' ? 'R' : 'L'}</span> : null}
+      {hand ? <span className={styles.bar} data-bar /> : null}
+      {hand ? <span className={styles.letter}>{hand === 'right' ? 'R' : 'L'}</span> : null}
       {lit === 'pressed' ? <span className={styles.dot} data-dot /> : null}
     </div>
   )

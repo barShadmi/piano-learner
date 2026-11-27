@@ -43,7 +43,7 @@
 }
 
 /* The song's hands: the full hand colour, the same as the falling note that lands on the key,
-   a bar along the bottom, and a letter on white keys. */
+   a bar along the bottom, and an R or L letter on every lit key (white and black). */
 .key[data-state='right'] {
   background: var(--hand-right);
 }
@@ -52,13 +52,14 @@
   background: var(--hand-left);
 }
 
+/* The bar on a song-lit key. --on-accent is readable on the hand fill in both themes (--text-muted was not). */
 .bar {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   height: var(--space-2);
-  background: var(--text-muted);
+  background: var(--on-accent);
 }
 
 .letter {
