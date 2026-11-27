@@ -1,54 +1,31 @@
-// Import is not wired up yet, so the button is off. Its off look is the muted one.
-const canImport = false
-
-const screenStyle = {
-  padding: 'var(--space-6)',
-}
-
-const headingStyle = {
-  fontSize: 'var(--text-2xl)',
-  margin: '0 0 var(--space-4)',
-}
-
-const emptyTextStyle = {
-  color: 'var(--text-muted)',
-  margin: '0 0 var(--space-5)',
-}
-
-const importButtonStyle = canImport
-  ? {
-      background: 'var(--accent)',
-      color: 'var(--on-accent)',
-      border: '1px solid var(--accent)',
-    }
-  : {
-      background: 'var(--surface-raised)',
-      color: 'var(--text-muted)',
-      border: '1px solid var(--border)',
-      cursor: 'not-allowed',
-    }
-
-const buttonBaseStyle = {
-  font: 'inherit',
-  minWidth: '44px',
-  padding: 'var(--space-2) var(--space-5)',
-  borderRadius: 'var(--radius-2)',
-}
+/// <reference types="vite/client" />
+import styles from './Library.module.css'
 
 export default function Library() {
   return (
-    <main style={screenStyle}>
-      <h1 style={headingStyle}>Your songs</h1>
-      <p style={emptyTextStyle}>
-        No songs yet. Import a sheet, a MIDI or MusicXML file, or a video to begin.
-      </p>
-      <button
-        type="button"
-        disabled={!canImport}
-        style={{ ...buttonBaseStyle, ...importButtonStyle }}
-      >
-        Import
-      </button>
+    <main className={styles.screen}>
+      <div className={styles.header}>
+        <h1 className={styles.title}>Your songs</h1>
+        {/* Import is wired up in phase 2. Then drop aria-disabled, the no-op click and the hint. */}
+        <button
+          type="button"
+          className="button"
+          aria-disabled="true"
+          aria-describedby="import-soon"
+          onClick={() => {}}
+        >
+          Import file
+        </button>
+      </div>
+      <section className={styles.panel} aria-label="Song list">
+        <p className={styles.empty}>
+          No songs yet. Import sheet music (a photo or PDF), a MIDI or MusicXML file, or a
+          falling-notes video to start playing.
+        </p>
+        <p className={styles.hint} id="import-soon">
+          Importing arrives in a later update.
+        </p>
+      </section>
     </main>
   )
 }

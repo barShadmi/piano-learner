@@ -12,3 +12,20 @@ test('the app opens to the Your songs screen', async () => {
     await app.close()
   }
 })
+
+test('the Import file button is off and reachable by keyboard', async () => {
+  const app = await electron.launch({ args: ['.', '--no-sandbox'] })
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+
+    const importButton = window.getByRole('button', { name: 'Import file' })
+    await expect(importButton).toBeVisible()
+    await expect(importButton).toHaveAttribute('aria-disabled', 'true')
+
+    await window.keyboard.press('Tab')
+    await expect(importButton).toBeFocused()
+  } finally {
+    await app.close()
+  }
+})

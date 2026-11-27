@@ -36,7 +36,7 @@ Build:
 Acceptance: `npm test`, `npm run typecheck`, `npm run lint`, `xvfb-run -a npm run test:e2e`, `xvfb-run -a npm run screens -- --out /tmp/shots` pass; the colour grep from design-tokens.md finds nothing; no `style=` in `Library.tsx`; only the listed files change.
 
 ## Step 2 · Token meaning fixes (builder)
-Files: `src/renderer/styles/tokens.css` only.
+Files: `src/renderer/styles/tokens.css` only. Bar approved both colour changes (2026-11-27).
 - `:root`: `--accent: var(--text); --on-accent: var(--surface);`. Delete the dark `--accent` and `--on-accent` lines so dark inherits.
 - `--wrong` light `#9f1239`, `--wrong-soft` light `#fbe1e7`; dark `--wrong` `#fb7185`, `--wrong-soft` `#3a1c26`.
 - Reduced motion: `--dur-fast` and `--dur` become `1ms` (not `0ms`).
@@ -68,3 +68,4 @@ Acceptance: all tests pass, typecheck, lint; only the listed files change.
 ## Log
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
+| 1 | builder (Haiku) | 1 | PASS |

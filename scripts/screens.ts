@@ -45,6 +45,11 @@ async function main(): Promise<void> {
           await page.waitForLoadState('networkidle')
           await page.evaluate(() => document.fonts.ready)
 
+          // A screen that does not exist shows "Screen not found". Stop instead of saving it.
+          if (await page.getByText('Screen not found').isVisible()) {
+            throw new Error(`Screen "${screen.name}" shows "Screen not found"`)
+          }
+
           const file = join(outDir, `${screen.name}-${theme}-${size.w}x${size.h}.png`)
           await page.screenshot({ path: file })
           written.push(file)
