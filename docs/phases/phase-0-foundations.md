@@ -4,7 +4,7 @@ Tags: (B) builder, (B+) builder-plus, (L) lead. `hard` steps go straight to buil
 
 ## Tasks
 - [x] Private repo piano-learner with CLAUDE.md, workflow, skills, phase files, agents (L) [writing-plans]
-- [ ] Electron + TypeScript + React + Vite shell with one window (B) [writing-plans]
+- [x] Electron + TypeScript + React + Vite shell with one window (B) [writing-plans]
 - [ ] Vitest and Playwright-for-Electron, one passing test each (B) [test-driven-development]
 - [ ] Internal song format: types, schema, sample song, validation (B) [test-driven-development]
 - [ ] GitHub Actions: lint, tests, Windows installer on every PR (B+)
