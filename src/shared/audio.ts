@@ -51,3 +51,25 @@ export type AudioState = {
 export type ListOutputsReply = { ok: true; outputs: OutputDevice[] } | { ok: false; error: string }
 export type TestToneReply = { ok: true } | { ok: false; error: string }
 export type StatusReply = { ok: true; status: EngineStatus } | { ok: false; error: string }
+
+// Piano (MIDI) shapes. They mirror what the native engine reports.
+// One key event. `down` is only set for a sustain event.
+export type MidiEvent = {
+  kind: 'on' | 'off' | 'sustain' | 'allOff'
+  note: number
+  velocity: number
+  down?: boolean
+  timeUs: number
+}
+
+export type MidiStatus = {
+  connected: boolean
+  portName?: string
+  error?: string
+  events: number
+  droppedSound: number
+  droppedScreen: number
+}
+
+export type MidiStatusReply = { ok: true; status: MidiStatus } | { ok: false; error: string }
+export type MidiReconnectReply = { ok: true } | { ok: false; error: string }

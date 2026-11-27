@@ -6,14 +6,17 @@
 //! A `start` while another `start` is still opening is rejected with "Sound is
 //! already starting." (it does not queue).
 
+use crate::midi::{self, JsEvent, MidiService};
 use crate::output::{self, Engine, OutputDevice, StartConfig as Config, StartInfo};
-use napi::bindgen_prelude::AsyncTask;
-use napi::{Env, Error, Result, Task};
+use napi::bindgen_prelude::{AsyncTask, Function};
+use napi::threadsafe_function::ThreadsafeFunctionCallMode;
+use napi::{Env, Error, Result, Status, Task};
 use napi_derive::napi;
 use std::sync::atomic::Ordering;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 static ENGINE: LazyLock<Engine> = LazyLock::new(Engine::new);
+static MIDI: LazyLock<MidiService> = LazyLock::new(|| MidiService::new(Arc::clone(ENGINE.midi_sink())));
 
 fn plain(message: String) -> Error {
     Error::from_reason(message)
@@ -151,4 +154,100 @@ pub fn status() -> JsStatus {
         underruns: stats.underruns.load(Ordering::Relaxed) as f64,
         measured_latency_ms: f64::from(stats.measured_latency_us.load(Ordering::Relaxed)) / 1000.0,
     }
+}
+
+#[napi(object, js_name = "MidiEvent")]
+pub struct JsMidiEvent {
+    #[napi(ts_type = "'on' | 'off' | 'sustain' | 'allOff'")]
+    pub kind: String,
+    /// MIDI note number (60 = middle C). 0 for sustain and allOff.
+    pub note: u8,
+    /// 1..127 for "on", otherwise 0.
+    pub velocity: u8,
+    /// Only for "sustain": true when the pedal is down.
+    pub down: Option<bool>,
+    /// Microseconds on a clock that only goes forward, taken when the key
+    /// message arrived (zero at the first MIDI call of this process).
+    pub time_us: f64,
+}
+
+#[napi(object, js_name = "MidiStatus")]
+pub struct JsMidiStatus {
+    pub connected: bool,
+    pub port_name: Option<String>,
+    /// Why the piano could not be opened, in plain words (gone once it connects).
+    pub error: Option<String>,
+    /// Key messages seen since the app started.
+    pub events: f64,
+    /// Keys that could not be sent to the sound in time (ring full or busy).
+    pub dropped_sound: f64,
+    /// Keys that could not be sent to the screens in time.
+    pub dropped_screen: f64,
+}
+
+impl From<JsEvent> for JsMidiEvent {
+    fn from(e: JsEvent) -> Self {
+        Self {
+            kind: e.kind.as_str().to_string(),
+            note: e.note,
+            velocity: e.velocity,
+            down: e.down,
+            time_us: e.time_us as f64,
+        }
+    }
+}
+
+/// The names of the MIDI inputs on this PC (empty when there are none).
+#[napi]
+pub fn list_midi_inputs() -> Vec<String> {
+    midi::list_inputs()
+}
+
+/// Whether the piano is connected, and how many key messages came in.
+#[napi]
+pub fn midi_status() -> JsMidiStatus {
+    let s = MIDI.status();
+    JsMidiStatus {
+        connected: s.connected,
+        port_name: s.port_name,
+        error: s.error,
+        events: s.events as f64,
+        dropped_sound: s.dropped_sound as f64,
+        dropped_screen: s.dropped_screen as f64,
+    }
+}
+
+/// Call `callback` with each batch of key events (an array, in order). Replaces
+/// an earlier callback. It does not keep Node running, and `stopMidi` lets it go.
+#[napi(ts_args_type = "callback: (events: Array<MidiEvent>) => void")]
+pub fn on_midi_event(callback: Function<Vec<JsMidiEvent>, ()>) -> Result<()> {
+    let tsfn = callback.build_threadsafe_function::<Vec<JsMidiEvent>>().weak::<true>().build()?;
+    MIDI.set_handler(Some(Arc::new(move |batch: Vec<JsEvent>| {
+        let n = batch.len() as u64;
+        let events: Vec<JsMidiEvent> = batch.into_iter().map(JsMidiEvent::from).collect();
+        if tsfn.call(events, ThreadsafeFunctionCallMode::NonBlocking) != Status::Ok {
+            MIDI.note_screen_drops(n);
+        }
+    })));
+    Ok(())
+}
+
+/// Start looking for the piano (checks every 2 seconds, reconnects if it is
+/// unplugged and plugged back in). Fine to call again.
+#[napi]
+pub fn start_midi() {
+    MIDI.start();
+}
+
+/// Close the piano's connection and open it again right away (for a quick
+/// unplug and replug that left a dead connection). Fine when not started.
+#[napi]
+pub fn reconnect_midi() {
+    MIDI.reconnect();
+}
+
+/// Stop looking, close the piano's port and let go of the callback.
+#[napi]
+pub fn stop_midi() {
+    MIDI.stop();
 }

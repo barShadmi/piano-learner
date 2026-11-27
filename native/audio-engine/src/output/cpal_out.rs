@@ -1,8 +1,8 @@
 //! cpal backend: the only backend on Linux and macOS, the fallback on Windows
 //! and the way into ASIO (an ASIO host is just another cpal host).
 
-use super::{f32_to_i16, f32_to_i32, latency_ms, snap_buffer, OutputDevice, StartInfo, BUFFER_REFUSED};
-use crate::core::{Command, EngineCore, EngineStats, Mixer};
+use super::{f32_to_i16, f32_to_i32, latency_ms, snap_buffer, OutputDevice, StartInfo, BUFFER_REFUSED, Inbox};
+use crate::core::{EngineCore, EngineStats, Mixer};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, ErrorKind, Host, SampleFormat, StreamConfig, SupportedBufferSize};
 use std::str::FromStr;
@@ -166,12 +166,12 @@ pub fn run(
     device_id: Option<String>,
     frames: u32,
     prefer_default: bool,
-    commands: rtrb::Consumer<Command>,
+    inbox: Inbox,
     stats: Arc<EngineStats>,
     stop: Arc<AtomicBool>,
     ready: mpsc::Sender<Result<StartInfo, String>>,
 ) {
-    let opened = open_stream(&host, backend, device_id.as_deref(), frames, prefer_default, commands, &stats);
+    let opened = open_stream(&host, backend, device_id.as_deref(), frames, prefer_default, inbox, &stats);
     let stream = match opened {
         Ok((stream, _)) if stop.load(Ordering::Acquire) => {
             // The caller gave up while the device was opening: give it back.
@@ -214,7 +214,7 @@ fn open_stream(
     device_id: Option<&str>,
     frames: u32,
     prefer_default: bool,
-    commands: rtrb::Consumer<Command>,
+    inbox: Inbox,
     stats: &Arc<EngineStats>,
 ) -> Result<(cpal::Stream, StartInfo), String> {
     let device = find_device(host, device_id)?;
@@ -233,7 +233,7 @@ fn open_stream(
     config.buffer_size = wanted;
     let channels = config.channels;
 
-    let core = EngineCore::new(commands, Mixer::new(sample_rate, channels));
+    let core = EngineCore::with_midi(inbox.commands, inbox.midi, Mixer::new(sample_rate, channels));
     let stream = build_for_format(&device, config, format, core, stats).map_err(|e| {
         if e.kind() == ErrorKind::UnsupportedConfig && matches!(config.buffer_size, BufferSize::Fixed(_)) {
             BUFFER_REFUSED.to_string()

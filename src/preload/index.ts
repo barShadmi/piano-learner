@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { StartConfig, ToneArgs } from '../shared/audio'
+import type { MidiEvent, StartConfig, ToneArgs } from '../shared/audio'
 
 // The main process passes a forced theme as a command-line argument.
 const themeArg = process.argv.find((arg) => arg.startsWith('--piano-theme='))
@@ -16,10 +16,25 @@ const audio = {
   status: () => ipcRenderer.invoke('audio:status')
 }
 
-// forcedTheme is added only when it is set, so a normal launch exposes just version and audio.
+// The piano. Key events arrive in batches. onEvents returns a function that stops listening.
+// The screens never get ipcRenderer itself.
+const midi = {
+  status: () => ipcRenderer.invoke('midi:status'),
+  reconnect: () => ipcRenderer.invoke('midi:reconnect'),
+  onEvents: (callback: (events: MidiEvent[]) => void): (() => void) => {
+    const listener = (_event: unknown, events: MidiEvent[]): void => callback(events)
+    ipcRenderer.on('midi:event', listener)
+    return () => {
+      ipcRenderer.removeListener('midi:event', listener)
+    }
+  }
+}
+
+// forcedTheme is added only when it is set, so a normal launch exposes just version, audio and midi.
 const api = {
   version: '0.0.1',
   audio,
+  midi,
   ...(forcedTheme ? { forcedTheme } : {})
 }
 

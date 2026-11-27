@@ -66,7 +66,7 @@ test('the window is locked down: no Node, no new windows, only the safe bridge',
     expect(result.process).toBe('undefined')
     expect(result.opened).toBeNull()
     expect(result.midi).toBe('denied')
-    expect(result.bridge).toEqual(['audio', 'version'])
+    expect(result.bridge).toEqual(['audio', 'midi', 'version'])
 
     await page.evaluate(() => {
       location.href = 'https://example.com'
@@ -115,6 +115,12 @@ test('the Sound screen opens from the library, says sound state, and goes back',
       timeout: 20_000
     })
 
+    // This container has no MIDI ports, so the piano shows as not found.
+    await expect(
+      window.getByText('No piano found. Check that the piano is on and the USB cable is plugged in.')
+    ).toBeVisible({ timeout: 10_000 })
+    await expect(window.getByRole('button', { name: 'Reconnect piano' })).toBeVisible()
+
     const play = window.getByRole('button', { name: 'Play test sound' })
     await expect(play).toBeVisible()
     if (await window.getByRole('button', { name: 'Try again' }).isVisible()) {
@@ -148,6 +154,14 @@ test('the sound questions are answered through the bridge and bad input is refus
     expect(result.keys).toEqual(['listOutputs', 'start', 'state', 'status', 'testTone'])
     expect(result.badStart).toMatchObject({ phase: 'failed' })
     expect(result.badTone).toMatchObject({ ok: false })
+
+    const piano = await page.evaluate(async () => {
+      const midi = (window as unknown as { pianoLearner: { midi: Record<string, unknown> } }).pianoLearner
+        .midi
+      return { keys: Object.keys(midi).sort(), status: await (midi.status as () => Promise<unknown>)() }
+    })
+    expect(piano.keys).toEqual(['onEvents', 'reconnect', 'status'])
+    expect(piano.status).toMatchObject({ ok: true, status: { connected: false } })
   } finally {
     await app.close()
   }

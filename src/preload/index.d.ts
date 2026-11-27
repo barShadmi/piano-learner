@@ -1,6 +1,9 @@
 import type {
   AudioState,
   ListOutputsReply,
+  MidiEvent,
+  MidiReconnectReply,
+  MidiStatusReply,
   StartConfig,
   StatusReply,
   TestToneReply,
@@ -20,6 +23,12 @@ declare global {
         start(config?: StartConfig): Promise<AudioState>
         testTone(args?: ToneArgs): Promise<TestToneReply>
         status(): Promise<StatusReply>
+      }
+      midi: {
+        status(): Promise<MidiStatusReply>
+        reconnect(): Promise<MidiReconnectReply>
+        /** Returns a function that stops the listening. */
+        onEvents(callback: (events: MidiEvent[]) => void): () => void
       }
     }
   }

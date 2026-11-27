@@ -14,8 +14,48 @@ export interface EngineStatus {
   measuredLatencyMs: number
 }
 
+/** The names of the MIDI inputs on this PC (empty when there are none). */
+export declare function listMidiInputs(): Array<string>
+
 /** Every sound output on this PC (empty when there is none). Returns a Promise. */
 export declare function listOutputs(): Promise<Array<OutputDevice>>
+
+export interface MidiEvent {
+  kind: 'on' | 'off' | 'sustain' | 'allOff'
+  /** MIDI note number (60 = middle C). 0 for sustain and allOff. */
+  note: number
+  /** 1..127 for "on", otherwise 0. */
+  velocity: number
+  /** Only for "sustain": true when the pedal is down. */
+  down?: boolean
+  /**
+   * Microseconds on a clock that only goes forward, taken when the key
+   * message arrived (zero at the first MIDI call of this process).
+   */
+  timeUs: number
+}
+
+/** Whether the piano is connected, and how many key messages came in. */
+export declare function midiStatus(): MidiStatus
+
+export interface MidiStatus {
+  connected: boolean
+  portName?: string
+  /** Why the piano could not be opened, in plain words (gone once it connects). */
+  error?: string
+  /** Key messages seen since the app started. */
+  events: number
+  /** Keys that could not be sent to the sound in time (ring full or busy). */
+  droppedSound: number
+  /** Keys that could not be sent to the screens in time. */
+  droppedScreen: number
+}
+
+/**
+ * Call `callback` with each batch of key events (an array, in order). Replaces
+ * an earlier callback. It does not keep Node running, and `stopMidi` lets it go.
+ */
+export declare function onMidiEvent(callback: (events: Array<MidiEvent>) => void): void
 
 export interface OutputDevice {
   id: string
@@ -27,6 +67,12 @@ export interface OutputDevice {
 
 /** Play a short sine tone (440 Hz for 1 second unless told otherwise). */
 export declare function playTestTone(frequencyHz?: number | undefined | null, seconds?: number | undefined | null): void
+
+/**
+ * Close the piano's connection and open it again right away (for a quick
+ * unplug and replug that left a dead connection). Fine when not started.
+ */
+export declare function reconnectMidi(): void
 
 /** Master volume from 0 to 1. */
 export declare function setVolume(volume: number): void
@@ -44,6 +90,12 @@ export interface StartConfig {
   bufferFrames?: number
 }
 
+/**
+ * Start looking for the piano (checks every 2 seconds, reconnects if it is
+ * unplugged and plugged back in). Fine to call again.
+ */
+export declare function startMidi(): void
+
 export interface StartResult {
   backend: string
   deviceName: string
@@ -58,3 +110,6 @@ export declare function status(): EngineStatus
 
 /** Close the sound output. Fine to call when nothing is open. */
 export declare function stop(): void
+
+/** Stop looking, close the piano's port and let go of the callback. */
+export declare function stopMidi(): void
