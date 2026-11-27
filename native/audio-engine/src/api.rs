@@ -9,6 +9,7 @@
 //! rejected with "The piano sound is already loading.".
 
 use crate::midi::{self, JsEvent, MidiService};
+use crate::song::{RealClock, SongEvent, SongPlayer, MAX_EVENTS};
 use crate::output::{self, Engine, OutputDevice, PianoState, StartConfig as Config, StartInfo};
 use napi::bindgen_prelude::{AsyncTask, Function};
 use napi::threadsafe_function::ThreadsafeFunctionCallMode;
@@ -18,6 +19,8 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock};
 
 static ENGINE: LazyLock<Engine> = LazyLock::new(Engine::new);
+static SONG: LazyLock<SongPlayer> =
+    LazyLock::new(|| SongPlayer::new(Arc::new(RealClock::new()), Arc::clone(ENGINE.song_sink()) as Arc<dyn crate::song::SongSink>));
 static MIDI: LazyLock<MidiService> = LazyLock::new(|| MidiService::new(Arc::clone(ENGINE.midi_sink())));
 
 fn plain(message: String) -> Error {
@@ -174,6 +177,7 @@ pub fn piano_status() -> JsPianoStatus {
 /// Close the sound output. Fine to call when nothing is open.
 #[napi]
 pub fn stop() {
+    SONG.stop();
     ENGINE.stop();
 }
 
@@ -379,4 +383,46 @@ pub fn stop_midi() {
 #[napi]
 pub fn set_local_control_off(off: bool) {
     MIDI.set_local_control_off(off);
+}
+
+#[napi(object, js_name = "SongEvent")]
+pub struct JsSongEvent {
+    /// When the note starts or ends, in milliseconds from the start of the song.
+    pub time_ms: f64,
+    /// MIDI note number, 21..108.
+    pub note: u32,
+    /// 1..127 (ignored for note-offs).
+    pub velocity: u32,
+    /// True = key down, false = key up.
+    pub on: bool,
+}
+
+/// Play a song through the sound engine, starting `from_ms` into it. A song
+/// that is already playing is replaced (its held notes are released first).
+/// Events may come in any order; they are played by time. Bad input (a note
+/// outside 21..108, a velocity outside 1..127, a time that is negative or not
+/// a number, more than 200000 events) throws and changes nothing.
+#[napi]
+pub fn play_song(events: Vec<JsSongEvent>, from_ms: f64) -> Result<()> {
+    if events.len() > MAX_EVENTS {
+        return Err(plain(format!("A song can have at most {MAX_EVENTS} events.")));
+    }
+    let events = events
+        .into_iter()
+        .map(|e| SongEvent::from_raw(e.time_ms, e.note, e.velocity, e.on))
+        .collect::<std::result::Result<Vec<_>, String>>()
+        .map_err(plain)?;
+    SONG.play(events, from_ms).map_err(plain)
+}
+
+/// Stop the song and release the notes it holds. Fine when nothing plays.
+#[napi]
+pub fn stop_song() {
+    SONG.stop();
+}
+
+/// Where the song is, in milliseconds, or null when no song is playing.
+#[napi]
+pub fn song_position() -> Option<f64> {
+    SONG.position_ms()
 }

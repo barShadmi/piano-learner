@@ -183,6 +183,36 @@ fn process_neither_allocates_nor_frees_when_banks_arrive_through_the_ring() {
 }
 
 #[test]
+fn process_never_allocates_or_frees_while_it_reads_the_song_ring_too() {
+    let (_tx, rx) = channel(64);
+    let (mut midi_tx, midi_rx) = channel(256);
+    let (mut song_tx, song_rx) = channel(1024);
+    let mut mixer = Mixer::new(48_000, 2);
+    assert!(mixer.set_bank(Some(Arc::new(small_bank()))).is_none());
+    let mut core = EngineCore::with_midi(rx, midi_rx, mixer).with_song(song_rx);
+    let mut out = vec![0.0f32; 2 * 128];
+
+    ARMED.with(|a| a.set(true));
+    for i in 0..3000u32 {
+        // A song playing chords over the player's own keys.
+        let note = 21 + (i % 88) as u8;
+        let _ = song_tx.push(Command::NoteOn { note, velocity: 1 + (i % 127) as u8, midi_us: 0 });
+        let _ = song_tx.push(Command::NoteOn { note: 21 + ((i + 5) % 88) as u8, velocity: 90, midi_us: 0 });
+        if i % 2 == 0 {
+            let _ = song_tx.push(Command::NoteOff { note: 21 + ((i + 11) % 88) as u8 });
+        }
+        if i % 7 == 0 {
+            let _ = midi_tx.push(Command::NoteOn { note: 60, velocity: 100, midi_us: 0 });
+        }
+        core.process(&mut out);
+    }
+    ARMED.with(|a| a.set(false));
+
+    assert_eq!(ALLOCS.load(Ordering::SeqCst), 0, "audio path allocated");
+    assert_eq!(FREES.load(Ordering::SeqCst), 0, "audio path freed memory");
+}
+
+#[test]
 fn process_never_allocates_with_latency_samples_even_when_the_ring_is_full() {
     use audio_engine::core::{clock, LatencySample, MidiInput};
     let (_tx, rx) = channel(64);

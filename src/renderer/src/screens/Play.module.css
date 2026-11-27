@@ -81,3 +81,18 @@
 .glyph {
   margin-right: var(--space-2);
 }
+
+/* The reason Listen could not play the song, with a way to the Sound screen. */
+.soundLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.soundReason {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text);
+}

@@ -240,6 +240,8 @@ pub struct Inbox {
     pub commands: rtrb::Consumer<Command>,
     /// The MIDI ring, with the producer the audio thread reports key timing on.
     pub midi: MidiInput,
+    /// Notes from the song player (a ring of its own, never timed).
+    pub song: rtrb::Consumer<Command>,
     pub banks: BankReceiver,
 }
 
@@ -247,10 +249,15 @@ pub struct Inbox {
 pub struct Outbox {
     pub commands: rtrb::Producer<Command>,
     pub midi: rtrb::Producer<Command>,
+    pub song: rtrb::Producer<Command>,
     pub banks: BankSender,
     /// Key timing from the audio thread.
     pub latency: rtrb::Consumer<LatencySample>,
 }
+
+/// Room for pending song notes between the song player and the audio thread.
+/// The player retries a refused note, so a full ring only delays it.
+pub const SONG_CAPACITY: usize = 1024;
 
 /// Room for key timing samples the control side has not collected yet.
 pub const LATENCY_RING_CAPACITY: usize = 256;
@@ -263,10 +270,16 @@ pub fn rings(command_capacity: usize, midi_capacity: usize) -> (Outbox, Inbox) {
     let (commands_tx, commands_rx) = rtrb::RingBuffer::new(command_capacity);
     let (midi_tx, midi_rx) = rtrb::RingBuffer::new(midi_capacity);
     let (banks_tx, banks_rx) = bank_link(BANK_LINK_CAPACITY);
+    let (song_tx, song_rx) = rtrb::RingBuffer::new(SONG_CAPACITY);
     let (latency_tx, latency_rx) = rtrb::RingBuffer::new(LATENCY_RING_CAPACITY);
     (
-        Outbox { commands: commands_tx, midi: midi_tx, banks: banks_tx, latency: latency_rx },
-        Inbox { commands: commands_rx, midi: MidiInput::new(midi_rx, latency_tx), banks: banks_rx },
+        Outbox { commands: commands_tx, midi: midi_tx, song: song_tx, banks: banks_tx, latency: latency_rx },
+        Inbox {
+            commands: commands_rx,
+            midi: MidiInput::new(midi_rx, latency_tx),
+            song: song_rx,
+            banks: banks_rx,
+        },
     )
 }
 
@@ -497,6 +510,7 @@ pub struct Engine {
     starting: AtomicBool,
     loading: AtomicBool,
     midi: Arc<MidiSink>,
+    song: Arc<MidiSink>,
 }
 
 impl Default for Engine {
@@ -531,6 +545,7 @@ impl Engine {
             starting: AtomicBool::new(false),
             loading: AtomicBool::new(false),
             midi: Arc::new(MidiSink::default()),
+            song: Arc::new(MidiSink::default()),
         }
     }
 
@@ -538,6 +553,12 @@ impl Engine {
     /// MIDI ring, and at nothing while no output runs.
     pub fn midi_sink(&self) -> &Arc<MidiSink> {
         &self.midi
+    }
+
+    /// Where the song player sends notes. Like `midi_sink`, it points at the
+    /// running output's song ring and at nothing while no output runs.
+    pub fn song_sink(&self) -> &Arc<MidiSink> {
+        &self.song
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -635,6 +656,7 @@ impl Engine {
             (st.session.take(), st.generation)
         };
         self.midi.set(None);
+        self.song.set(None);
         if let Some(mut old) = old {
             old.banks.reclaim();
             old.running.stop();
@@ -642,7 +664,7 @@ impl Engine {
         }
         self.stats.reset();
         let (running, info, outbox) = opener(cfg, &self.stats)?;
-        let Outbox { mut commands, midi, mut banks, latency } = outbox;
+        let Outbox { mut commands, midi, song, mut banks, latency } = outbox;
         let mut st = self.state();
         if st.generation != generation {
             drop(st);
@@ -659,6 +681,7 @@ impl Engine {
         }
         st.session = Some(Session { running, info: info.clone(), commands, banks, latency });
         self.midi.set(Some(midi));
+        self.song.set(Some(song));
         Ok(info)
     }
 
@@ -671,6 +694,7 @@ impl Engine {
             st.session.take()
         };
         self.midi.set(None);
+        self.song.set(None);
         if let Some(mut s) = old {
             s.banks.reclaim();
             s.running.stop();
@@ -937,6 +961,47 @@ mod tests {
         assert_eq!(second.pop(), Ok(key));
         e.stop();
         assert!(e.midi_sink().push(key), "after stop there is no output to send to, not an error");
+        assert!(second.pop().is_err(), "nothing reaches a stopped output");
+    }
+
+    /// An opener whose song consumer the test keeps.
+    fn song_opener(
+        slot: Arc<Mutex<Option<rtrb::Consumer<Command>>>>,
+    ) -> impl FnOnce(&StartConfig, &Arc<EngineStats>) -> Result<Opened, String> {
+        move |_cfg, _stats| {
+            let (out, inbox) = rings(8, 8);
+            *slot.lock().unwrap() = Some(inbox.song);
+            let (running, info) = spawn_backend("fake", move |stop, ready| {
+                let _keep = (inbox.commands, inbox.midi.commands);
+                let _ = ready.send(Ok(fake_info("fake")));
+                while !stop.load(Ordering::Acquire) {
+                    thread::park_timeout(Duration::from_millis(20));
+                }
+            })?;
+            Ok((running, info, out))
+        }
+    }
+
+    #[test]
+    fn the_song_sink_follows_each_start_with_a_ring_of_its_own() {
+        let e = Engine::new();
+        let note = Command::NoteOn { note: 60, velocity: 90, midi_us: 0 };
+        let key = Command::NoteOn { note: 61, velocity: 90, midi_us: 5 };
+        let (first, second) = (Arc::new(Mutex::new(None)), Arc::new(Mutex::new(None)));
+        assert!(e.song_sink().push(note), "no output yet: nobody to send to, not an error");
+        e.start_with(&StartConfig::default(), song_opener(Arc::clone(&first))).unwrap();
+        assert!(e.song_sink().push(note));
+        assert!(e.midi_sink().push(key));
+        e.start_with(&StartConfig::default(), song_opener(Arc::clone(&second))).unwrap();
+        assert!(e.song_sink().push(note), "the same sink reaches the new output after a restart");
+        let mut first = first.lock().unwrap().take().unwrap();
+        let mut second = second.lock().unwrap().take().unwrap();
+        assert_eq!(first.pop(), Ok(note));
+        assert!(first.pop().is_err(), "the old ring gets nothing after the restart, and no MIDI key ever lands here");
+        assert_eq!(second.pop(), Ok(note));
+        assert!(second.pop().is_err());
+        e.stop();
+        assert!(e.song_sink().push(note));
         assert!(second.pop().is_err(), "nothing reaches a stopped output");
     }
 

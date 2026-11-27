@@ -23,7 +23,7 @@ lewton = "0.10.2"
 
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.27.0"
-windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation"] }
+windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_Security", "Win32_Media"] }
 
 # Tests are plain executables that Node never loads, so the napi bindings
 # (src/api.rs) are left out of them. This dev-only self dependency switches the

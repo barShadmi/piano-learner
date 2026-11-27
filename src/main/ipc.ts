@@ -5,9 +5,43 @@ import type { MidiEvent } from '../shared/audio'
 import type { LatencySaveReply } from '../shared/latency'
 import type { VolumeReply } from '../shared/audio'
 import { checkSettings, type SettingsSetReply, type SoundSettings } from '../shared/settings'
+import { isSongId, type SongGetReply, type SongImportReply, type SongSummary } from '../shared/songs'
 import type { AudioController } from './audioController'
-import { parseStartConfig, parseToneArgs, parseVolume } from './audioValidate'
+import { parseSongPlay, parseStartConfig, parseToneArgs, parseVolume } from './audioValidate'
+import type { ImportResult } from './import'
+import { getSong, listSongs, saveSong } from './songStore'
 import { saveSettings } from './settingsStore'
+
+export interface SongsIpcOptions {
+  /** The songs folder in the user data folder. */
+  folder: string
+  /** Shows the file dialog. Resolves to the chosen path, or undefined when Bar cancels. */
+  chooseFile: () => Promise<string | undefined>
+  /** Imports one file (in a worker thread). */
+  importFile: (path: string) => Promise<ImportResult>
+}
+
+// The song library questions. The renderer never gives a path: the import dialog is opened here,
+// and a song is only read by its id (checked to be a UUID).
+export function registerSongsIpc({ folder, chooseFile, importFile }: SongsIpcOptions): void {
+  ipcMain.handle('songs:list', (): SongSummary[] => listSongs(folder))
+  ipcMain.handle('songs:get', (_event, id: unknown): SongGetReply => {
+    const song = isSongId(id) ? getSong(folder, id) : undefined
+    return song ? { ok: true, song } : { ok: false, error: 'This song could not be found.' }
+  })
+  ipcMain.handle('songs:import', async (): Promise<SongImportReply> => {
+    const picked = await chooseFile()
+    if (picked === undefined) return { ok: false, cancelled: true }
+    const result = await importFile(picked)
+    if (!result.ok) return { ok: false, error: result.error }
+    try {
+      return { ok: true, song: saveSong(folder, result.song) }
+    } catch (error) {
+      console.error('The song could not be saved:', error)
+      return { ok: false, error: 'The song could not be saved.' }
+    }
+  })
+}
 
 // Only the sound questions the Sound screen may ask. Each one checks its input,
 // and none of them rejects: a bad request comes back as a plain reply.
@@ -37,6 +71,14 @@ export function registerAudioIpc(audio: AudioController, currentSettings: () => 
   // The piano questions: the status, and a reconnect. Key events go to the screen by sendMidiEvents.
   ipcMain.handle('midi:status', () => audio.midiStatus())
   ipcMain.handle('midi:reconnect', () => audio.reconnectMidi())
+  // Listen mode: the engine plays the song. The events are checked here before they reach the engine.
+  ipcMain.handle('song:play', (_event, input: unknown) => {
+    const parsed = parseSongPlay(input)
+    if (!parsed.ok) return parsed
+    return audio.playSong(parsed.value.events, parsed.value.fromMs)
+  })
+  ipcMain.handle('song:stop', () => audio.stopSong())
+  ipcMain.handle('song:position', () => audio.songPosition())
   registerLatencyIpc(audio)
 }
 

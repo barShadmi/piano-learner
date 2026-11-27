@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { createAudioController, type Engine, type MidiEngine } from './audioController'
 import type { MidiEvent, MidiStatus, StartConfig, StartResult } from '../shared/audio'
 import type { SoundSettings } from '../shared/settings'
-import type { PianoEngine, LatencyEngine } from './audioController'
+import type { PianoEngine, LatencyEngine, SongEngine } from './audioController'
+import type { SongEvent } from '../shared/audio'
 import type { LatencySummary } from '../shared/latency'
 
 const goodResult: StartResult = {
@@ -783,5 +784,107 @@ describe('createAudioController saved output that is gone', () => {
     const c = createAudioController({ engine })
     await c.applySettings({ ...saved, deviceId: 'Gone (USB)' })
     expect(engine.starts).toEqual([{ deviceId: 'Gone (USB)', backend: 'wasapi-exclusive', bufferFrames: 128 }])
+  })
+})
+
+function fakeSong(over: Partial<SongEngine> = {}) {
+  const song = {
+    played: [] as Array<{ events: SongEvent[]; fromMs: number }>,
+    stops: 0,
+    position: null as number | null,
+    playSong(events: SongEvent[], fromMs: number) {
+      song.played.push({ events, fromMs })
+    },
+    stopSong() {
+      song.stops++
+    },
+    songPosition: (): number | null => song.position,
+    ...over
+  }
+  return song
+}
+
+const songEvents: SongEvent[] = [
+  { timeMs: 0, note: 60, velocity: 80, on: true },
+  { timeMs: 500, note: 60, velocity: 0, on: false }
+]
+
+describe('createAudioController song player', () => {
+  it('hands the events and the start point to the engine once sound is on', async () => {
+    const song = fakeSong()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...song } })
+    await c.start({})
+    expect(c.playSong(songEvents, 250)).toEqual({ ok: true })
+    expect(song.played).toEqual([{ events: songEvents, fromMs: 250 }])
+  })
+
+  it('says sound is not on yet instead of playing into nothing', () => {
+    const song = fakeSong()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...song } })
+    expect(c.playSong(songEvents, 0)).toEqual({ ok: false, error: 'Sound is not on yet.' })
+    expect(song.played).toEqual([])
+  })
+
+  it('turns an engine refusal into its plain reason and never throws', async () => {
+    const song = fakeSong({
+      playSong() {
+        throw new Error('Every song note must be a piano key, 21 to 108.')
+      }
+    })
+    const c = createAudioController({ engine: { ...fakeEngine(), ...song } })
+    await c.start({})
+    expect(c.playSong(songEvents, 0)).toEqual({ ok: false, error: 'Every song note must be a piano key, 21 to 108.' })
+  })
+
+  it('says the song player is missing when the engine has none', async () => {
+    const c = createAudioController({ engine: fakeEngine() })
+    await c.start({})
+    expect(c.playSong(songEvents, 0)).toEqual({ ok: false, error: expect.stringContaining('song') })
+    expect(c.songPosition()).toEqual({ ok: false, error: expect.stringContaining('song') })
+    expect(c.stopSong()).toEqual({ ok: true })
+  })
+
+  it('says the sound engine is missing when there is none', () => {
+    const c = createAudioController({ loadError: 'No engine here.' })
+    expect(c.playSong(songEvents, 0)).toEqual({ ok: false, error: 'Sound is not on yet.' })
+    expect(c.songPosition()).toEqual({ ok: false, error: 'No engine here.' })
+    expect(c.stopSong()).toEqual({ ok: true })
+  })
+
+  it('stops the song, and a throw while stopping does not escape', () => {
+    const song = fakeSong()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...song } })
+    expect(c.stopSong()).toEqual({ ok: true })
+    expect(song.stops).toBe(1)
+    const bad = fakeSong({
+      stopSong() {
+        throw new Error('boom')
+      }
+    })
+    const d = createAudioController({ engine: { ...fakeEngine(), ...bad } })
+    expect(() => d.stopSong()).not.toThrow()
+  })
+
+  it('reports the song position, with null when no song plays', () => {
+    const song = fakeSong()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...song } })
+    expect(c.songPosition()).toEqual({ ok: true, positionMs: null })
+    song.position = 1234.5
+    expect(c.songPosition()).toEqual({ ok: true, positionMs: 1234.5 })
+  })
+
+  it('refuses a position that is not a number or null', () => {
+    const song = fakeSong({ songPosition: () => 'soon' as unknown as number })
+    const c = createAudioController({ engine: { ...fakeEngine(), ...song } })
+    expect(c.songPosition()).toEqual({ ok: false, error: expect.any(String) })
+  })
+
+  it('stops the song before it stops the sound', async () => {
+    const order: string[] = []
+    const song = fakeSong({ stopSong: () => void order.push('song') })
+    const engine = { ...fakeEngine({ stop: () => void order.push('engine') }), ...song }
+    const c = createAudioController({ engine })
+    c.stop()
+    expect(order).toEqual(['song', 'engine'])
   })
 })

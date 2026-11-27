@@ -60,6 +60,9 @@ impl From<rtrb::Consumer<Command>> for MidiInput {
     }
 }
 
+/// The most song commands one `process` call takes from the song ring. The rest wait for the next call.
+pub const SONG_COMMANDS_PER_CALL: usize = 64;
+
 /// Lock-free command channel (single producer, single consumer).
 pub fn channel(capacity: usize) -> (rtrb::Producer<Command>, rtrb::Consumer<Command>) {
     rtrb::RingBuffer::new(capacity)
@@ -70,6 +73,9 @@ pub struct EngineCore {
     commands: rtrb::Consumer<Command>,
     /// Notes from the MIDI thread, which is the only producer of this ring.
     midi: MidiInput,
+    /// Notes from the song player, a ring of its own with one producer. Never
+    /// timed: a song note is not a key press.
+    song: Option<rtrb::Consumer<Command>>,
     mixer: Mixer,
     /// Piano banks that arrive while the output runs (see `piano::bank_link`).
     bank_link: Option<crate::piano::BankReceiver>,
@@ -84,7 +90,13 @@ impl EngineCore {
 
     pub fn with_midi(commands: rtrb::Consumer<Command>, midi: impl Into<MidiInput>, mixer: Mixer) -> Self {
         clock::init();
-        Self { commands, midi: midi.into(), mixer, bank_link: None }
+        Self { commands, midi: midi.into(), song: None, mixer, bank_link: None }
+    }
+
+    /// Also play the notes the song player sends through `song`.
+    pub fn with_song(mut self, song: rtrb::Consumer<Command>) -> Self {
+        self.song = Some(song);
+        self
     }
 
     /// Accept piano banks through `link`. A replaced bank goes back through
@@ -113,6 +125,13 @@ impl EngineCore {
                 let _ = latency.push(LatencySample { note, midi_us, picked_us });
             }
             self.mixer.handle(cmd);
+        }
+        if let Some(song) = &mut self.song {
+            // A cap, so a song ring that keeps filling can never hold one callback up.
+            for _ in 0..SONG_COMMANDS_PER_CALL {
+                let Ok(cmd) = song.pop() else { break };
+                self.mixer.handle(cmd);
+            }
         }
         self.mixer.render(out);
     }
@@ -315,6 +334,91 @@ mod tests {
         assert_eq!(lat.pop().unwrap().note, 60);
         assert!(lat.pop().is_err(), "the other two were dropped");
         assert!(midi_tx.slots() == 64, "the midi ring was emptied");
+    }
+
+    // ---- the song ring ----
+
+    #[test]
+    fn the_core_reads_the_command_midi_and_song_rings_every_call() {
+        let (mut tx, rx) = channel(16);
+        let (mut midi_tx, midi_rx) = channel(16);
+        let (mut song_tx, song_rx) = channel(16);
+        let mut core = EngineCore::with_midi(rx, midi_rx, Mixer::new(48_000, 1)).with_song(song_rx);
+        tx.push(Command::SetMasterVolume(1.0)).unwrap();
+        midi_tx.push(Command::NoteOn { note: 60, velocity: 100, midi_us: 0 }).unwrap();
+        song_tx.push(Command::NoteOn { note: 72, velocity: 100, midi_us: 0 }).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert!(tx.slots() == 16 && midi_tx.slots() == 16 && song_tx.slots() == 16, "all three rings emptied");
+        assert!(out.iter().any(|s| s.abs() > 0.01));
+    }
+
+    #[test]
+    fn a_song_note_alone_is_heard_and_its_note_off_silences_it() {
+        let (_tx, rx) = channel(16);
+        let (mut song_tx, song_rx) = channel(16);
+        let mut core = EngineCore::new(rx, Mixer::new(48_000, 1)).with_song(song_rx);
+        song_tx.push(Command::NoteOn { note: 69, velocity: 100, midi_us: 0 }).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert!(out.iter().any(|s| s.abs() > 0.01), "song note is audible");
+        song_tx.push(Command::NoteOff { note: 69 }).unwrap();
+        let mut tail = [0.0f32; 48_000];
+        core.process(&mut tail);
+        assert!(tail[tail.len() - 480..].iter().all(|s| s.abs() < 0.001), "released note dies away");
+    }
+
+    #[test]
+    fn song_notes_are_never_timed_even_with_a_stamp_and_a_latency_ring() {
+        let (mut core, mut midi_tx, mut lat) = latency_core(16);
+        let (mut song_tx, song_rx) = channel(16);
+        core = core.with_song(song_rx);
+        song_tx.push(Command::NoteOn { note: 60, velocity: 100, midi_us: clock::now_us() }).unwrap();
+        song_tx.push(Command::NoteOn { note: 62, velocity: 100, midi_us: 0 }).unwrap();
+        midi_tx.push(Command::NoteOn { note: 64, velocity: 100, midi_us: clock::now_us() }).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert_eq!(lat.pop().unwrap().note, 64, "only the key from the MIDI ring is timed");
+        assert!(lat.pop().is_err(), "no sample for any song note");
+    }
+
+    #[test]
+    fn one_call_reads_at_most_64_song_commands_and_the_rest_wait_for_the_next() {
+        let (_tx, rx) = channel(16);
+        let (mut song_tx, song_rx) = channel(1024);
+        let mut core = EngineCore::new(rx, Mixer::new(48_000, 1)).with_song(song_rx);
+        for i in 0..200u32 {
+            song_tx.push(Command::NoteOn { note: 21 + (i % 88) as u8, velocity: 90, midi_us: 0 }).unwrap();
+        }
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert_eq!(song_tx.slots(), 1024 - 200 + 64, "64 taken, 136 left");
+        core.process(&mut out);
+        core.process(&mut out);
+        core.process(&mut out);
+        assert_eq!(song_tx.slots(), 1024, "nothing is lost, it just takes four calls");
+    }
+
+    #[test]
+    fn a_full_song_ring_with_a_busy_producer_cannot_hold_one_call_up() {
+        let (_tx, rx) = channel(16);
+        let (mut song_tx, song_rx) = channel(1024);
+        let mut core = EngineCore::new(rx, Mixer::new(48_000, 1)).with_song(song_rx);
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&stop);
+        let producer = std::thread::spawn(move || {
+            let mut i = 0u32;
+            while !flag.load(Ordering::Relaxed) {
+                let _ = song_tx.push(Command::NoteOff { note: 21 + (i % 88) as u8 });
+                i = i.wrapping_add(1);
+            }
+        });
+        let mut out = [0.0f32; 48];
+        for _ in 0..2000 {
+            core.process(&mut out);
+        }
+        stop.store(true, Ordering::Relaxed);
+        producer.join().unwrap();
     }
 
     #[test]

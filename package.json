@@ -19,6 +19,9 @@
     "dist:win": "npm run build:native:asio && npm run typecheck && electron-vite build && electron-builder --win nsis --publish never"
   },
   "dependencies": {
+    "@tonejs/midi": "2.0.28",
+    "fast-xml-parser": "5.12.1",
+    "fflate": "0.8.3",
     "pixi.js": "8.22.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"

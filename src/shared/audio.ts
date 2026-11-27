@@ -84,3 +84,26 @@ export type MidiStatus = {
 
 export type MidiStatusReply = { ok: true; status: MidiStatus } | { ok: false; error: string }
 export type MidiReconnectReply = { ok: true } | { ok: false; error: string }
+
+// Listen mode: the native engine plays the song, so the sound never goes through the screen.
+// One note going on or off, `timeMs` into the song.
+export type SongEvent = {
+  timeMs: number
+  note: number
+  velocity: number
+  on: boolean
+}
+
+export type SongPlayArgs = {
+  events: SongEvent[]
+  fromMs: number
+}
+
+// The most events one song may have (the engine refuses more).
+export const MAX_SONG_EVENTS = 200_000
+// The longest time a song may name: one day, in milliseconds.
+export const MAX_SONG_TIME_MS = 86_400_000
+
+export type SongReply = { ok: true } | { ok: false; error: string }
+// `positionMs` is null when no song is playing.
+export type SongPositionReply = { ok: true; positionMs: number | null } | { ok: false; error: string }
