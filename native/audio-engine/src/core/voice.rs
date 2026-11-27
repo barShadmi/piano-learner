@@ -139,11 +139,6 @@ impl NoteVoice {
         self.pending.map_or(self.note, |p| p.note)
     }
 
-    /// The voice answers to note events: key down or held by the pedal.
-    pub fn is_live(&self) -> bool {
-        self.stage != Stage::Idle && (self.key_down || self.sustained)
-    }
-
     pub fn is_key_down(&self) -> bool {
         self.key_down
     }

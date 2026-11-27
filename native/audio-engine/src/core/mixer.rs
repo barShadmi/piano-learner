@@ -1,16 +1,96 @@
 use crate::core::command::Command;
 use crate::core::tone::ToneVoice;
 use crate::core::voice::{note_gain, NoteVoice};
+use crate::piano::voice::Start;
+use crate::piano::{layer_for_velocity, soft_limit, PianoVoice, SampleBank};
+use std::sync::Arc;
 
 /// Number of tone voices, fixed at construction.
 pub const VOICES: usize = 8;
 /// Number of piano note voices, fixed at construction.
 pub const NOTE_VOICES: usize = 64;
 
+/// Gain of the whole piano mix before the limiter (headroom for chords).
+const PIANO_MASTER: f32 = 0.5;
+
+/// What the note-voice arrays have in common, so voice choice and key events
+/// are written once for the stand-in voice and the piano voice.
+trait Slot {
+    fn is_active(&self) -> bool;
+    fn is_key_down(&self) -> bool;
+    fn note(&self) -> u8;
+    fn serial(&self) -> u64;
+    fn key_up(&mut self, pedal_down: bool);
+    fn retrigger_fade(&mut self);
+}
+
+macro_rules! slot {
+    ($t:ty) => {
+        impl Slot for $t {
+            fn is_active(&self) -> bool {
+                <$t>::is_active(self)
+            }
+            fn is_key_down(&self) -> bool {
+                <$t>::is_key_down(self)
+            }
+            fn note(&self) -> u8 {
+                <$t>::note(self)
+            }
+            fn serial(&self) -> u64 {
+                <$t>::serial(self)
+            }
+            fn key_up(&mut self, pedal_down: bool) {
+                <$t>::key_up(self, pedal_down)
+            }
+            fn retrigger_fade(&mut self) {
+                <$t>::retrigger_fade(self)
+            }
+        }
+    };
+}
+slot!(NoteVoice);
+slot!(PianoVoice);
+
+/// A free voice, else the oldest one whose key is up, else the oldest.
+fn voice_to_use<V: Slot>(voices: &[V]) -> usize {
+    let mut oldest_up: Option<usize> = None;
+    let mut oldest = 0;
+    for (i, v) in voices.iter().enumerate() {
+        if !v.is_active() {
+            return i;
+        }
+        if !v.is_key_down() && oldest_up.is_none_or(|j| v.serial() < voices[j].serial()) {
+            oldest_up = Some(i);
+        }
+        if v.serial() < voices[oldest].serial() {
+            oldest = i;
+        }
+    }
+    oldest_up.unwrap_or(oldest)
+}
+
+/// The same note again: every older voice of it, also one already in
+/// release, fades out in about 5 ms.
+fn retrigger<V: Slot>(voices: &mut [V], note: u8) {
+    for v in voices.iter_mut().filter(|v| v.is_active() && v.note() == note) {
+        v.retrigger_fade();
+    }
+}
+
+fn key_off<V: Slot>(voices: &mut [V], note: u8, pedal: bool) {
+    for v in voices.iter_mut().filter(|v| v.is_key_down() && v.note() == note) {
+        v.key_up(pedal);
+    }
+}
+
 /// Mixes the tone voices into interleaved output. Never allocates after `new`.
 pub struct Mixer {
     voices: [ToneVoice; VOICES],
     notes: [NoteVoice; NOTE_VOICES],
+    /// Sampled piano voices, used instead of `notes` while a bank is set.
+    piano: [PianoVoice; NOTE_VOICES],
+    bank: Option<Arc<SampleBank>>,
+    output_rate: f64,
     pedal_down: bool,
     /// Counts note starts so the oldest voice can be found.
     next_serial: u64,
@@ -30,6 +110,9 @@ impl Mixer {
         Self {
             voices: [ToneVoice::new(sample_rate); VOICES],
             notes: [NoteVoice::new(sample_rate); NOTE_VOICES],
+            piano: [PianoVoice::new(sample_rate); NOTE_VOICES],
+            bank: None,
+            output_rate: f64::from(sample_rate.max(1)),
             pedal_down: false,
             next_serial: 0,
             channels: usize::from(channels.max(1)),
@@ -53,6 +136,7 @@ impl Mixer {
             Command::StopAll => {
                 self.voices.iter_mut().for_each(ToneVoice::release);
                 self.notes.iter_mut().for_each(NoteVoice::stop);
+                self.piano.iter_mut().for_each(PianoVoice::stop);
             }
             Command::NoteOn { note, velocity } => self.note_on(note, velocity),
             Command::NoteOff { note } => self.note_off(note),
@@ -60,9 +144,13 @@ impl Mixer {
                 self.pedal_down = down;
                 if !down {
                     self.notes.iter_mut().for_each(NoteVoice::pedal_up);
+                    self.piano.iter_mut().for_each(PianoVoice::pedal_up);
                 }
             }
-            Command::AllNotesOff => self.notes.iter_mut().for_each(NoteVoice::stop),
+            Command::AllNotesOff => {
+                self.notes.iter_mut().for_each(NoteVoice::stop);
+                self.piano.iter_mut().for_each(PianoVoice::stop);
+            }
             Command::SetMasterVolume(v) => {
                 if v.is_finite() {
                     self.master_target = v.clamp(0.0, 1.0);
@@ -71,74 +159,106 @@ impl Mixer {
         }
     }
 
+    /// Use the sampled piano (or go back to the stand-in voice with `None`).
+    /// Returns the bank it replaces; the caller must not drop it on the audio
+    /// thread. Stand-in notes fade out; piano voices point into the old bank,
+    /// so they are silenced at once.
+    pub fn set_bank(&mut self, bank: Option<Arc<SampleBank>>) -> Option<Arc<SampleBank>> {
+        self.notes.iter_mut().for_each(NoteVoice::stop);
+        self.piano.iter_mut().for_each(PianoVoice::kill);
+        std::mem::replace(&mut self.bank, bank)
+    }
+
     pub fn active_voices(&self) -> usize {
         self.voices.iter().filter(|v| v.is_active()).count()
     }
 
     /// Piano note voices that are sounding (including ones fading out).
     pub fn active_note_voices(&self) -> usize {
-        self.notes.iter().filter(|v| v.is_active()).count()
+        self.notes.iter().filter(|v| v.is_active()).count() + self.piano.iter().filter(|v| v.is_active()).count()
     }
 
     fn note_on(&mut self, note: u8, velocity: u8) {
         if velocity == 0 {
             return self.note_off(note);
         }
-        if note > 127 || NoteVoice::frequency(note) >= self.nyquist_hz {
+        if note > 127 {
             return;
         }
-        // The same note again: the old voice fades out quickly, a new one starts.
-        for v in self.notes.iter_mut().filter(|v| v.is_live() && v.note() == note) {
-            v.retrigger_fade();
+        if self.bank.is_some() {
+            return self.piano_note_on(note, velocity);
         }
+        if NoteVoice::frequency(note) >= self.nyquist_hz {
+            return;
+        }
+        // The same note again: older voices of it fade out quickly, a new one starts.
+        retrigger(&mut self.notes, note);
         let serial = self.next_serial;
         self.next_serial += 1;
-        let i = self.note_voice_to_use();
+        let i = voice_to_use(&self.notes);
         self.notes[i].steal(note, note_gain(velocity), serial);
     }
 
-    fn note_off(&mut self, note: u8) {
-        let pedal = self.pedal_down;
-        for v in self.notes.iter_mut().filter(|v| v.is_key_down() && v.note() == note) {
-            v.key_up(pedal);
-        }
+    fn piano_note_on(&mut self, note: u8, velocity: u8) {
+        let start = self.bank.as_deref().and_then(|bank| {
+            let choice = bank.choose(layer_for_velocity(velocity), note)?;
+            let sample = bank.samples().get(choice.sample)?;
+            let step = 2f64.powf(f64::from(choice.semitones) / 12.0) * f64::from(sample.sample_rate) / self.output_rate;
+            Some(Start { sample: choice.sample as u32, gain: bank.gain(choice.sample, velocity), step })
+        });
+        let Some(start) = start else {
+            return;
+        };
+        retrigger(&mut self.piano, note);
+        let serial = self.next_serial;
+        self.next_serial += 1;
+        let i = voice_to_use(&self.piano);
+        self.piano[i].steal(note, start, serial);
     }
 
-    /// A free voice, else the oldest one whose key is up, else the oldest.
-    fn note_voice_to_use(&self) -> usize {
-        let mut oldest_up: Option<usize> = None;
-        let mut oldest = 0;
-        for (i, v) in self.notes.iter().enumerate() {
-            if !v.is_active() {
-                return i;
-            }
-            if !v.is_key_down() && oldest_up.is_none_or(|j| v.serial() < self.notes[j].serial()) {
-                oldest_up = Some(i);
-            }
-            if v.serial() < self.notes[oldest].serial() {
-                oldest = i;
-            }
-        }
-        oldest_up.unwrap_or(oldest)
+    fn note_off(&mut self, note: u8) {
+        key_off(&mut self.notes, note, self.pedal_down);
+        key_off(&mut self.piano, note, self.pedal_down);
     }
 
     /// Fill `out` with interleaved frames. A trailing partial frame is zeroed.
+    /// Stereo output carries left and right; mono gets their mean; any
+    /// further channels get the mean too.
     pub fn render(&mut self, out: &mut [f32]) {
         let mut frames = out.chunks_exact_mut(self.channels);
         for frame in &mut frames {
-            let mut sum = 0.0f32;
+            let mut mono = 0.0f32;
             for v in &mut self.voices {
-                sum += v.next_sample();
+                mono += v.next_sample();
             }
             for v in &mut self.notes {
-                sum += v.next_sample();
+                mono += v.next_sample();
+            }
+            let (mut left, mut right) = (0.0f32, 0.0f32);
+            if let Some(bank) = self.bank.as_deref() {
+                for v in &mut self.piano {
+                    let (l, r) = v.next_frame(bank);
+                    left += l;
+                    right += r;
+                }
+                left = soft_limit(left * PIANO_MASTER);
+                right = soft_limit(right * PIANO_MASTER);
             }
             if self.master < self.master_target {
                 self.master = (self.master + self.master_step).min(self.master_target);
             } else if self.master > self.master_target {
                 self.master = (self.master - self.master_step).max(self.master_target);
             }
-            frame.fill((sum * self.master).clamp(-1.0, 1.0));
+            let l = ((mono + left) * self.master).clamp(-1.0, 1.0);
+            let r = ((mono + right) * self.master).clamp(-1.0, 1.0);
+            if let [only] = frame {
+                *only = ((l + r) * 0.5).clamp(-1.0, 1.0);
+            } else {
+                let mid = ((l + r) * 0.5).clamp(-1.0, 1.0);
+                frame.fill(mid);
+                frame[0] = l;
+                frame[1] = r;
+            }
         }
         frames.into_remainder().fill(0.0);
     }
@@ -660,5 +780,281 @@ mod tests {
         render(&mut m, 480);
         assert_eq!(m.active_voices(), 1);
         assert_eq!(m.active_note_voices(), 1);
+    }
+
+    // ---- sampled piano ----
+
+    use crate::piano::bank::Sample;
+    use crate::piano::testing::{grid_bank, note_hz, sine_sample};
+    use crate::piano::SampleBank;
+    use std::sync::Arc;
+
+    fn with_bank(bank: SampleBank, channels: u16) -> Mixer {
+        let mut m = Mixer::new(SR, channels);
+        assert!(m.set_bank(Some(Arc::new(bank))).is_none());
+        m
+    }
+
+    /// One sample of `hz` for key 60 on every layer, so only the pitch can tell layers apart.
+    fn layered_bank(freqs: [f64; 4]) -> SampleBank {
+        SampleBank::from_samples((0..4u8).map(|l| sine_sample(60, l, freqs[usize::from(l)], 0.5, 3.0)).collect())
+    }
+
+    #[test]
+    fn a_key_on_a_sampled_note_plays_that_samples_pitch() {
+        let mut m = with_bank(grid_bank(3.0), 1);
+        m.handle(on(69, 100));
+        render(&mut m, 480);
+        let s = render(&mut m, SR as usize);
+        assert!((crossings(&s) as i32 - 880).abs() <= 9, "crossings {}", crossings(&s));
+    }
+
+    #[test]
+    fn one_and_two_semitones_up_give_the_right_frequency() {
+        for (key, semis) in [(61u8, 1.0f64), (62, 2.0)] {
+            let bank = SampleBank::from_samples(vec![sine_sample(60, 0, note_hz(60), 0.5, 3.0)]);
+            let mut m = with_bank(bank, 1);
+            m.handle(on(key, 100));
+            render(&mut m, 480);
+            let s = render(&mut m, SR as usize);
+            let want = 2.0 * note_hz(60) * 2f64.powf(semis / 12.0);
+            let got = crossings(&s) as f64;
+            assert!((got / want - 1.0).abs() < 0.01, "key {key}: {got} vs {want}");
+        }
+    }
+
+    #[test]
+    fn velocity_picks_the_layer() {
+        let freqs = [200.0, 300.0, 400.0, 500.0];
+        let expect = [(1u8, 0usize), (40, 0), (41, 1), (72, 1), (73, 2), (100, 2), (101, 3), (127, 3)];
+        for (vel, layer) in expect {
+            let mut m = with_bank(layered_bank(freqs), 1);
+            m.handle(on(60, vel));
+            render(&mut m, 480);
+            let s = render(&mut m, SR as usize / 2);
+            let want = freqs[layer]; // 2 * f * 0.5 s crossings
+            assert!((crossings(&s) as f64 - want).abs() <= 4.0, "velocity {vel}: {} crossings, wanted about {want}", crossings(&s));
+        }
+    }
+
+    #[test]
+    fn a_single_voice_is_scaled_by_the_master_gain_of_one_half() {
+        let mut m = with_bank(grid_bank(1.0), 1);
+        m.handle(on(69, 127)); // layer 3, sample amplitude 0.8, gain 1.0
+        let s = render(&mut m, 4800);
+        let p = peak(&s);
+        assert!((p - 0.4).abs() < 0.01, "peak {p}");
+    }
+
+    #[test]
+    fn softer_keys_are_quieter_across_layers() {
+        let peak_at = |v: u8| {
+            let mut m = with_bank(grid_bank(1.0), 1);
+            m.handle(on(69, v));
+            peak(&render(&mut m, 4800))
+        };
+        let (a, b, c) = (peak_at(30), peak_at(70), peak_at(120));
+        assert!(a < b && b < c, "{a} {b} {c}");
+    }
+
+    #[test]
+    fn stereo_samples_keep_their_left_and_right() {
+        let mut d = Vec::new();
+        for i in 0..48_000 {
+            let v = ((i as f32 * 0.05).sin() * 16000.0) as i16;
+            d.push(v);
+            d.push(0);
+        }
+        let mut m = with_bank(SampleBank::from_samples(vec![Sample::new(60, 0, 48_000, 2, d)]), 2);
+        m.handle(on(60, 100));
+        let mut out = vec![0.0f32; 2 * 2000];
+        m.render(&mut out);
+        assert!(out.chunks_exact(2).any(|f| f[0].abs() > 0.05));
+        assert!(out.chunks_exact(2).all(|f| f[1] == 0.0), "right channel is silent");
+    }
+
+    #[test]
+    fn mono_output_mixes_both_sides() {
+        let mut d = Vec::new();
+        for _ in 0..48_000 {
+            d.push(16384i16);
+            d.push(0);
+        }
+        let mut m = with_bank(SampleBank::from_samples(vec![Sample::new(60, 0, 48_000, 2, d)]), 1);
+        m.handle(on(60, 127));
+        let s = render(&mut m, 100);
+        // (0.5 + 0) / 2 mid, times velocity 127 gain 1.0, times master 0.5
+        assert!((s[50] - 0.125).abs() < 0.001, "{}", s[50]);
+    }
+
+    #[test]
+    fn the_damper_ends_a_note_within_150_ms_of_key_up() {
+        let mut m = with_bank(grid_bank(3.0), 1);
+        m.handle(on(60, 100));
+        render(&mut m, 4800);
+        m.handle(off(60));
+        let s = render(&mut m, 48_000 * 150 / 1000);
+        assert!(peak(&s[..2400]) > 0.02, "still audible while the damper comes down");
+        assert_eq!(m.active_note_voices(), 0);
+    }
+
+    #[test]
+    fn keys_above_e6_keep_sounding_after_key_up_without_the_pedal() {
+        let mut m = with_bank(grid_bank(3.0), 1);
+        m.handle(on(96, 100));
+        render(&mut m, 4800);
+        m.handle(off(96));
+        let s = render(&mut m, SR as usize);
+        assert!(peak(&s[s.len() - 4800..]) > 0.02, "still ringing a second later");
+        assert_eq!(m.active_note_voices(), 1);
+    }
+
+    #[test]
+    fn the_pedal_holds_a_damped_piano_note_and_lifting_it_releases_it() {
+        let mut m = with_bank(grid_bank(3.0), 1);
+        m.handle(Command::Sustain(true));
+        m.handle(on(60, 100));
+        render(&mut m, 2000);
+        m.handle(off(60));
+        let held = render(&mut m, SR as usize / 2);
+        assert!(peak(&held[held.len() - 2400..]) > 0.02);
+        m.handle(Command::Sustain(false));
+        render(&mut m, 48_000 * 150 / 1000);
+        assert_eq!(m.active_note_voices(), 0);
+    }
+
+    #[test]
+    fn a_piano_note_pressed_again_fades_every_older_voice_of_it_including_released_ones_in_5ms() {
+        let mut m = with_bank(grid_bank(3.0), 1);
+        m.handle(on(60, 100));
+        render(&mut m, 2000);
+        m.handle(off(60)); // 120 ms damper fade starts
+        render(&mut m, 480);
+        m.handle(on(60, 100));
+        assert_eq!(m.active_note_voices(), 2);
+        render(&mut m, 240 + 4);
+        assert_eq!(m.active_note_voices(), 1, "the voice in release is gone within 5 ms");
+    }
+
+    #[test]
+    fn a_stand_in_note_pressed_again_also_fades_a_voice_that_is_in_release() {
+        let mut m = Mixer::new(SR, 1);
+        m.handle(on(69, 100));
+        render(&mut m, 2000);
+        m.handle(off(69)); // 80 ms release starts
+        render(&mut m, 480);
+        m.handle(on(69, 100));
+        assert_eq!(m.active_note_voices(), 2);
+        render(&mut m, 240 + 4);
+        assert_eq!(m.active_note_voices(), 1);
+    }
+
+    #[test]
+    fn repeated_piano_note_never_jumps() {
+        let mut m = with_bank(grid_bank(3.0), 1);
+        let mut all = vec![0.0f32];
+        for _ in 0..40 {
+            m.handle(on(60, 64));
+            all.extend(render(&mut m, 700));
+        }
+        assert!(max_jump(&all) < 0.1, "jump {}", max_jump(&all));
+        assert!(peak(&all) > 0.02);
+    }
+
+    #[test]
+    fn sixty_four_loud_piano_voices_never_pass_one_and_the_limiter_is_at_work() {
+        let samples: Vec<Sample> = (0..4u8).map(|l| sine_sample(60, l, 261.63, 1.0, 1.0)).collect();
+        let mut m = with_bank(SampleBank::from_samples(samples), 2);
+        // Same key pressed 64 times is faded; use many keys that all reach the one sample.
+        for n in 58..=62u8 {
+            m.handle(on(n, 127));
+        }
+        let mut loud = 0.0f32;
+        for _ in 0..20 {
+            let s = render(&mut m, 2 * 480);
+            assert!(s.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+            loud = loud.max(peak(&s));
+        }
+        assert!(loud > 0.7, "five in-phase full-scale voices (2.5 before limiting) must reach the knee, got {loud}");
+
+        let mut m = with_bank(grid_bank(1.0), 2);
+        for n in 36..=99u8 {
+            m.handle(on(n, 127));
+        }
+        assert_eq!(m.active_note_voices(), 64);
+        let mut loud = 0.0f32;
+        for _ in 0..50 {
+            let s = render(&mut m, 2 * 480);
+            assert!(s.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+            loud = loud.max(peak(&s));
+        }
+        assert!(loud > 0.7, "peak {loud}");
+    }
+
+    #[test]
+    fn a_piano_mix_below_the_knee_is_not_touched_by_the_limiter() {
+        let mut m = with_bank(grid_bank(1.0), 1);
+        m.handle(on(69, 127));
+        let s = render(&mut m, 4800);
+        // 0.8 * sin * 0.5: exactly the scaled sample, no bending anywhere.
+        for (i, x) in s.iter().enumerate().skip(1) {
+            let want = 0.8 * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 48_000.0).sin() as f32 * 0.5;
+            assert!((x - want).abs() < 0.002, "frame {i}: {x} vs {want}");
+        }
+    }
+
+    #[test]
+    fn keys_the_bank_cannot_reach_are_ignored() {
+        let mut m = with_bank(grid_bank(1.0), 1);
+        m.handle(on(10, 100));
+        m.handle(on(120, 100));
+        assert_eq!(m.active_note_voices(), 0);
+    }
+
+    #[test]
+    fn setting_a_bank_fades_stand_in_notes_and_swapping_returns_the_old_bank() {
+        let mut m = Mixer::new(SR, 1);
+        m.handle(on(69, 100));
+        render(&mut m, 480);
+        let first = Arc::new(grid_bank(1.0));
+        assert!(m.set_bank(Some(Arc::clone(&first))).is_none());
+        render(&mut m, 4800);
+        assert_eq!(m.active_note_voices(), 0, "the stand-in note was released");
+        m.handle(on(60, 100));
+        render(&mut m, 480);
+        let old = m.set_bank(Some(Arc::new(grid_bank(1.0)))).expect("the old bank comes back");
+        assert!(Arc::ptr_eq(&old, &first));
+        assert_eq!(m.active_note_voices(), 0, "piano voices that pointed into the old bank are gone");
+        let back = m.set_bank(None).unwrap();
+        drop(back);
+        m.handle(on(69, 100));
+        assert!(m.active_note_voices() > 0, "no bank: the stand-in plays again");
+    }
+
+    #[test]
+    fn stop_all_and_all_notes_off_fade_piano_voices() {
+        for cmd in [Command::StopAll, Command::AllNotesOff] {
+            let mut m = with_bank(grid_bank(3.0), 1);
+            m.handle(Command::Sustain(true));
+            m.handle(on(60, 100));
+            m.handle(on(96, 100));
+            m.handle(off(60));
+            render(&mut m, 480);
+            m.handle(cmd);
+            let s = render(&mut m, 48_000 * 150 / 1000);
+            assert!(s[s.len() - 480..].iter().all(|x| *x == 0.0));
+            assert_eq!(m.active_note_voices(), 0);
+        }
+    }
+
+    #[test]
+    fn sixty_five_piano_notes_cap_at_64_voices() {
+        let mut m = with_bank(grid_bank(2.0), 1);
+        for n in 36..=100u8 {
+            m.handle(on(n, 50));
+        }
+        let s = render(&mut m, 4800);
+        assert!(s.iter().all(|x| x.is_finite()));
+        assert_eq!(m.active_note_voices(), 64);
     }
 }

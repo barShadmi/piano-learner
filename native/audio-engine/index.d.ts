@@ -20,6 +20,14 @@ export declare function listMidiInputs(): Array<string>
 /** Every sound output on this PC (empty when there is none). Returns a Promise. */
 export declare function listOutputs(): Promise<Array<OutputDevice>>
 
+/**
+ * Decode the piano sounds in `folder` on a worker thread. Sound keeps working
+ * with a simple tone meanwhile, and switches to the piano when this finishes
+ * (also on an output that is already running). Returns a Promise; rejects with
+ * "The piano sound is already loading." if a load is still running.
+ */
+export declare function loadPiano(folder: string): Promise<PianoLoadResult>
+
 export interface MidiEvent {
   kind: 'on' | 'off' | 'sustain' | 'allOff'
   /** MIDI note number (60 = middle C). 0 for sustain and allOff. */
@@ -63,6 +71,22 @@ export interface OutputDevice {
   isDefault: boolean
   /** "wasapi-exclusive", "wasapi-shared", "asio" or "cpal". */
   backend: string
+}
+
+export interface PianoLoadResult {
+  /** How many piano sounds were decoded. */
+  samples: number
+  /** How long decoding took, in seconds. */
+  seconds: number
+}
+
+/** How the piano sound is doing. Answers at once, even while it loads. */
+export declare function pianoStatus(): PianoStatus
+
+export interface PianoStatus {
+  state: 'loading' | 'ready' | 'failed'
+  /** Why the piano sound could not load, in plain words (only when failed). */
+  error?: string
 }
 
 /** Play a short sine tone (440 Hz for 1 second unless told otherwise). */

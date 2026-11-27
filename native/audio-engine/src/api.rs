@@ -4,10 +4,12 @@
 //! is only held for quick bookkeeping; the audio thread never touches it.
 //!
 //! A `start` while another `start` is still opening is rejected with "Sound is
-//! already starting." (it does not queue).
+//! already starting." (it does not queue). `loadPiano` also runs on a worker
+//! thread (decoding takes a second or two); a second call while it runs is
+//! rejected with "The piano sound is already loading.".
 
 use crate::midi::{self, JsEvent, MidiService};
-use crate::output::{self, Engine, OutputDevice, StartConfig as Config, StartInfo};
+use crate::output::{self, Engine, OutputDevice, PianoState, StartConfig as Config, StartInfo};
 use napi::bindgen_prelude::{AsyncTask, Function};
 use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi::{Env, Error, Result, Status, Task};
@@ -102,6 +104,37 @@ impl Task for StartTask {
     }
 }
 
+#[napi(object, js_name = "PianoLoadResult")]
+pub struct JsPianoLoadResult {
+    /// How many piano sounds were decoded.
+    pub samples: u32,
+    /// How long decoding took, in seconds.
+    pub seconds: f64,
+}
+
+#[napi(object, js_name = "PianoStatus")]
+pub struct JsPianoStatus {
+    #[napi(ts_type = "'loading' | 'ready' | 'failed'")]
+    pub state: String,
+    /// Why the piano sound could not load, in plain words (only when failed).
+    pub error: Option<String>,
+}
+
+pub struct LoadPianoTask(String);
+
+impl Task for LoadPianoTask {
+    type Output = output::PianoInfo;
+    type JsValue = JsPianoLoadResult;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        ENGINE.load_piano(std::path::Path::new(&self.0)).map_err(plain)
+    }
+
+    fn resolve(&mut self, _env: Env, info: Self::Output) -> Result<Self::JsValue> {
+        Ok(JsPianoLoadResult { samples: info.samples as u32, seconds: info.seconds })
+    }
+}
+
 /// Every sound output on this PC (empty when there is none). Returns a Promise.
 #[napi(ts_return_type = "Promise<Array<OutputDevice>>")]
 pub fn list_outputs() -> AsyncTask<ListTask> {
@@ -117,6 +150,25 @@ pub fn start(config: Option<JsStartConfig>) -> AsyncTask<StartTask> {
         .map(|c| Config { device_id: c.device_id, backend: c.backend, buffer_frames: c.buffer_frames })
         .unwrap_or_default();
     AsyncTask::new(StartTask(cfg))
+}
+
+/// Decode the piano sounds in `folder` on a worker thread. Sound keeps working
+/// with a simple tone meanwhile, and switches to the piano when this finishes
+/// (also on an output that is already running). Returns a Promise; rejects with
+/// "The piano sound is already loading." if a load is still running.
+#[napi(ts_return_type = "Promise<PianoLoadResult>")]
+pub fn load_piano(folder: String) -> AsyncTask<LoadPianoTask> {
+    AsyncTask::new(LoadPianoTask(folder))
+}
+
+/// How the piano sound is doing. Answers at once, even while it loads.
+#[napi]
+pub fn piano_status() -> JsPianoStatus {
+    match ENGINE.piano_status() {
+        PianoState::Loading => JsPianoStatus { state: "loading".to_string(), error: None },
+        PianoState::Ready => JsPianoStatus { state: "ready".to_string(), error: None },
+        PianoState::Failed(reason) => JsPianoStatus { state: "failed".to_string(), error: Some(reason) },
+    }
 }
 
 /// Close the sound output. Fine to call when nothing is open.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createAudioController, type Engine, type MidiEngine } from './audioController'
 import type { MidiEvent, MidiStatus, StartResult } from '../shared/audio'
+import type { PianoEngine } from './audioController'
 
 const goodResult: StartResult = {
   backend: 'wasapi-exclusive',
@@ -39,7 +40,7 @@ function fakeEngine(over: Partial<Engine> = {}): Engine & { toneCalls: number; s
 describe('createAudioController', () => {
   it('begins off', () => {
     const c = createAudioController({ engine: fakeEngine() })
-    expect(c.state()).toEqual({ phase: 'off' })
+    expect(c.state()).toEqual({ phase: 'off', piano: 'loading' })
   })
 
   it('is starting while the engine opens, then on with the result', async () => {
@@ -50,20 +51,24 @@ describe('createAudioController', () => {
     const pending = c.start({})
     expect(c.state().phase).toBe('starting')
     release(goodResult)
-    expect(await pending).toEqual({ phase: 'on', result: goodResult })
-    expect(c.state()).toEqual({ phase: 'on', result: goodResult })
+    expect(await pending).toEqual({ phase: 'on', result: goodResult, piano: 'loading' })
+    expect(c.state()).toEqual({ phase: 'on', result: goodResult, piano: 'loading' })
   })
 
   it('is failed with the reason when the engine rejects', async () => {
     const c = createAudioController({
       engine: fakeEngine({ start: async () => Promise.reject(new Error('No sound card found.')) })
     })
-    expect(await c.start({})).toEqual({ phase: 'failed', error: 'No sound card found.' })
+    expect(await c.start({})).toEqual({
+      phase: 'failed',
+      error: 'No sound card found.',
+      piano: 'loading'
+    })
   })
 
   it('is failed with the load error when the engine is missing', async () => {
     const c = createAudioController({ loadError: 'The sound engine file is missing.' })
-    expect(await c.start({})).toEqual({
+    expect(await c.start({})).toMatchObject({
       phase: 'failed',
       error: 'The sound engine file is missing.'
     })
@@ -131,7 +136,7 @@ describe('createAudioController', () => {
     await c.start({})
     c.stop()
     expect(engine.stopCalls).toBe(1)
-    expect(c.state()).toEqual({ phase: 'off' })
+    expect(c.state()).toEqual({ phase: 'off', piano: 'loading' })
   })
 
   it('does not throw when stopping without an engine', () => {
@@ -248,5 +253,96 @@ describe('createAudioController piano (MIDI)', () => {
       }
     })
     expect(c.midiStatus()).toEqual({ ok: false, error: 'Broken.' })
+  })
+})
+
+function fakePiano(over: Partial<PianoEngine> = {}) {
+  const piano = {
+    folders: [] as string[],
+    loadPiano: async (folder: string) => {
+      piano.folders.push(folder)
+      return { samples: 120, seconds: 1.5 }
+    },
+    ...over
+  }
+  return piano
+}
+
+describe('createAudioController piano sound', () => {
+  it('says loading until the piano sound has loaded, then ready', async () => {
+    let release: () => void = () => {}
+    const piano = fakePiano({
+      loadPiano: () =>
+        new Promise((resolve) => {
+          release = () => resolve({ samples: 120, seconds: 1 })
+        })
+    })
+    const c = createAudioController({ engine: { ...fakeEngine(), ...piano } })
+    const pending = c.loadPiano('/songs/piano')
+    expect(c.state().piano).toBe('loading')
+    release()
+    await pending
+    expect(c.state()).toEqual({ phase: 'off', piano: 'ready' })
+  })
+
+  it('loads from the folder it is given', async () => {
+    const piano = fakePiano()
+    const c = createAudioController({ engine: { ...fakeEngine(), ...piano } })
+    await c.loadPiano('/songs/piano')
+    expect(piano.folders).toEqual(['/songs/piano'])
+  })
+
+  it('is failed with the reason when loading fails, and sound is not affected', async () => {
+    const piano = fakePiano({ loadPiano: async () => Promise.reject(new Error('No piano sounds found.')) })
+    const c = createAudioController({ engine: { ...fakeEngine(), ...piano } })
+    await c.start({})
+    await c.loadPiano('/nowhere')
+    expect(c.state()).toEqual({
+      phase: 'on',
+      result: goodResult,
+      piano: 'failed',
+      pianoError: 'No piano sounds found.'
+    })
+  })
+
+  it('keeps the piano answer when sound starts or stops afterwards', async () => {
+    const c = createAudioController({ engine: { ...fakeEngine(), ...fakePiano() } })
+    await c.loadPiano('/p')
+    expect(await c.start({})).toMatchObject({ phase: 'on', piano: 'ready' })
+    c.stop()
+    expect(c.state()).toEqual({ phase: 'off', piano: 'ready' })
+  })
+
+  it('asks the engine once when told twice while loading', async () => {
+    let release: () => void = () => {}
+    let calls = 0
+    const piano = fakePiano({
+      loadPiano: () => {
+        calls++
+        return new Promise((resolve) => {
+          release = () => resolve({ samples: 120, seconds: 1 })
+        })
+      }
+    })
+    const c = createAudioController({ engine: { ...fakeEngine(), ...piano } })
+    const first = c.loadPiano('/p')
+    const second = c.loadPiano('/p')
+    release()
+    await Promise.all([first, second])
+    expect(calls).toBe(1)
+    expect(c.state().piano).toBe('ready')
+  })
+
+  it('says plainly that the piano sound is missing when the engine is old', async () => {
+    const c = createAudioController({ engine: fakeEngine() })
+    await c.loadPiano('/p')
+    expect(c.state()).toMatchObject({ piano: 'failed', pianoError: expect.stringMatching(/\.$/) })
+  })
+
+  it('says failed when there is no engine at all', async () => {
+    const c = createAudioController({ loadError: 'The sound engine file is missing.' })
+    expect(c.state().piano).toBe('failed')
+    await expect(c.loadPiano('/p')).resolves.toBeUndefined()
+    expect(c.state().pianoError).toMatch(/\.$/)
   })
 })

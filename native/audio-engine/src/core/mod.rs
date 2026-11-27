@@ -42,6 +42,8 @@ pub struct EngineCore {
     /// Notes from the MIDI thread, which is the only producer of this ring.
     midi: rtrb::Consumer<Command>,
     mixer: Mixer,
+    /// Piano banks that arrive while the output runs (see `piano::bank_link`).
+    bank_link: Option<crate::piano::BankReceiver>,
 }
 
 impl EngineCore {
@@ -52,10 +54,24 @@ impl EngineCore {
     }
 
     pub fn with_midi(commands: rtrb::Consumer<Command>, midi: rtrb::Consumer<Command>, mixer: Mixer) -> Self {
-        Self { commands, midi, mixer }
+        Self { commands, midi, mixer, bank_link: None }
+    }
+
+    /// Accept piano banks through `link`. A replaced bank goes back through
+    /// the link, so the audio thread never frees one.
+    pub fn with_bank_link(mut self, link: crate::piano::BankReceiver) -> Self {
+        self.bank_link = Some(link);
+        self
     }
 
     pub fn process(&mut self, out: &mut [f32]) {
+        if let Some(link) = &mut self.bank_link {
+            while let Some(bank) = link.next_bank() {
+                if let Some(old) = self.mixer.set_bank(Some(bank)) {
+                    link.give_back(old);
+                }
+            }
+        }
         while let Ok(cmd) = self.commands.pop() {
             self.mixer.handle(cmd);
         }
@@ -161,5 +177,38 @@ mod tests {
         assert_eq!(s.underruns.load(Relaxed), 0);
         assert_eq!(s.measured_latency_us.load(Relaxed), 0);
         assert!(!s.failed.load(Relaxed));
+    }
+
+    #[test]
+    fn a_bank_sent_while_running_is_used_and_the_old_one_comes_back_to_be_dropped_elsewhere() {
+        use crate::piano::{bank_link, testing::grid_bank};
+        use std::sync::Arc;
+        let (mut sender, receiver) = bank_link(2);
+        let (mut tx, rx) = channel(16);
+        let mut core = EngineCore::new(rx, Mixer::new(48_000, 1)).with_bank_link(receiver);
+        let first = Arc::new(grid_bank(0.5));
+        sender.send(Arc::clone(&first)).unwrap();
+        let mut out = [0.0f32; 480];
+        core.process(&mut out);
+        assert_eq!(Arc::strong_count(&first), 2, "the audio thread now holds it");
+        tx.push(Command::NoteOn { note: 69, velocity: 127 }).unwrap();
+        core.process(&mut out);
+        let p = out.iter().fold(0.0f32, |a, b| a.max(b.abs()));
+        assert!((p - 0.4).abs() < 0.02, "piano sample peak (0.8 * master 0.5), not the stand-in: {p}");
+
+        sender.send(Arc::new(grid_bank(0.5))).unwrap();
+        core.process(&mut out);
+        assert_eq!(Arc::strong_count(&first), 2, "now in the return ring, not freed on the audio thread");
+        assert_eq!(sender.reclaim(), 1);
+        assert_eq!(Arc::strong_count(&first), 1, "dropped by the control side");
+    }
+
+    #[test]
+    fn without_a_bank_link_nothing_changes() {
+        let (_tx, rx) = channel(16);
+        let mut core = EngineCore::new(rx, Mixer::new(48_000, 1));
+        let mut out = [0.0f32; 64];
+        core.process(&mut out);
+        assert!(out.iter().all(|s| *s == 0.0));
     }
 }

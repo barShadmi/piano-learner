@@ -4,10 +4,11 @@
 
 use crate::core::{Command, EngineStats};
 use crate::midi::{MidiSink, MIDI_CAPACITY};
+use crate::piano::{bank_link, BankReceiver, BankSender, SampleBank};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub mod cpal_out;
 #[cfg(windows)]
@@ -234,22 +235,32 @@ where
 
 /// The rings the render thread reads: commands from the control side, and
 /// notes from the MIDI thread (a ring of its own, so it has one producer).
+/// `banks` brings the piano sound (see `piano::bank_link`).
 pub struct Inbox {
     pub commands: rtrb::Consumer<Command>,
     pub midi: rtrb::Consumer<Command>,
+    pub banks: BankReceiver,
 }
 
 /// The other ends of an `Inbox`.
 pub struct Outbox {
     pub commands: rtrb::Producer<Command>,
     pub midi: rtrb::Producer<Command>,
+    pub banks: BankSender,
 }
+
+/// Room in each ring of a bank link. Only one bank is ever sent per output.
+const BANK_LINK_CAPACITY: usize = 2;
 
 /// New rings for one output start.
 pub fn rings(command_capacity: usize, midi_capacity: usize) -> (Outbox, Inbox) {
     let (commands_tx, commands_rx) = rtrb::RingBuffer::new(command_capacity);
     let (midi_tx, midi_rx) = rtrb::RingBuffer::new(midi_capacity);
-    (Outbox { commands: commands_tx, midi: midi_tx }, Inbox { commands: commands_rx, midi: midi_rx })
+    let (banks_tx, banks_rx) = bank_link(BANK_LINK_CAPACITY);
+    (
+        Outbox { commands: commands_tx, midi: midi_tx, banks: banks_tx },
+        Inbox { commands: commands_rx, midi: midi_rx, banks: banks_rx },
+    )
 }
 
 /// What a backend hands back once it plays.
@@ -333,12 +344,34 @@ struct Session {
     running: Running,
     info: StartInfo,
     commands: rtrb::Producer<Command>,
+    banks: BankSender,
+}
+
+/// How the piano sound is doing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PianoState {
+    Loading,
+    Ready,
+    Failed(String),
+}
+
+/// What a finished load tells the caller.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PianoInfo {
+    pub samples: usize,
+    /// How long decoding took.
+    pub seconds: f64,
 }
 
 struct State {
     volume: f32,
     generation: u64,
     session: Option<Session>,
+    /// The loaded piano. The engine keeps it for good, so the audio thread
+    /// is never the last to let go of it.
+    bank: Option<Arc<SampleBank>>,
+    piano: PianoState,
+    piano_info: Option<PianoInfo>,
 }
 
 /// Control side of the engine. The state lock is only held for quick
@@ -349,6 +382,7 @@ pub struct Engine {
     stats: Arc<EngineStats>,
     state: Mutex<State>,
     starting: AtomicBool,
+    loading: AtomicBool,
     midi: Arc<MidiSink>,
 }
 
@@ -371,8 +405,16 @@ impl Engine {
     pub fn new() -> Self {
         Self {
             stats: Arc::new(EngineStats::default()),
-            state: Mutex::new(State { volume: 1.0, generation: 0, session: None }),
+            state: Mutex::new(State {
+                volume: 1.0,
+                generation: 0,
+                session: None,
+                bank: None,
+                piano: PianoState::Loading,
+                piano_info: None,
+            }),
             starting: AtomicBool::new(false),
+            loading: AtomicBool::new(false),
             midi: Arc::new(MidiSink::default()),
         }
     }
@@ -392,7 +434,64 @@ impl Engine {
     }
 
     pub fn info(&self) -> Option<StartInfo> {
-        self.state().session.as_ref().map(|s| s.info.clone())
+        let mut st = self.state();
+        st.session.as_mut().map(|s| {
+            s.banks.reclaim();
+            s.info.clone()
+        })
+    }
+
+    /// How the piano sound is doing. Never waits for a load.
+    pub fn piano_status(&self) -> PianoState {
+        self.state().piano.clone()
+    }
+
+    /// Decode the piano sound in `dir` on the calling thread (the API runs
+    /// this on a worker). Only one load runs at a time; once a load worked, a
+    /// later call just returns the same answer. The bank goes to the running
+    /// output now, and to every output started later.
+    pub fn load_piano(&self, dir: &std::path::Path) -> Result<PianoInfo, String> {
+        self.load_piano_with(|| SampleBank::load_dir(dir))
+    }
+
+    pub fn load_piano_with<F>(&self, loader: F) -> Result<PianoInfo, String>
+    where
+        F: FnOnce() -> Result<SampleBank, String>,
+    {
+        if self.loading.swap(true, Ordering::AcqRel) {
+            return Err("The piano sound is already loading.".to_string());
+        }
+        let _flag = StartingFlag(&self.loading);
+        {
+            let mut st = self.state();
+            if let Some(info) = st.piano_info {
+                return Ok(info);
+            }
+            st.piano = PianoState::Loading;
+        }
+        let began = Instant::now();
+        match loader() {
+            Ok(bank) => {
+                let info = PianoInfo { samples: bank.len(), seconds: began.elapsed().as_secs_f64() };
+                let bank = Arc::new(bank);
+                // Under the one lock a start also takes when it installs its
+                // session, so either this sends the bank or that start does.
+                let mut st = self.state();
+                st.bank = Some(Arc::clone(&bank));
+                st.piano = PianoState::Ready;
+                st.piano_info = Some(info);
+                if let Some(s) = st.session.as_mut() {
+                    // A full ring cannot happen (one bank per output); if it did, the
+                    // output would keep the stand-in voice.
+                    let _ = s.banks.send(bank);
+                }
+                Ok(info)
+            }
+            Err(reason) => {
+                self.state().piano = PianoState::Failed(reason.clone());
+                Err(reason)
+            }
+        }
     }
 
     /// Start with the real backends.
@@ -421,12 +520,13 @@ impl Engine {
             (st.session.take(), st.generation)
         };
         self.midi.set(None);
-        if let Some(old) = old {
+        if let Some(mut old) = old {
+            old.banks.reclaim();
             old.running.stop();
         }
         self.stats.reset();
         let (running, info, outbox) = opener(cfg, &self.stats)?;
-        let Outbox { mut commands, midi } = outbox;
+        let Outbox { mut commands, midi, mut banks } = outbox;
         let mut st = self.state();
         if st.generation != generation {
             drop(st);
@@ -437,7 +537,11 @@ impl Engine {
         if st.volume < 1.0 {
             let _ = commands.push(Command::SetMasterVolume(st.volume));
         }
-        st.session = Some(Session { running, info: info.clone(), commands });
+        if let Some(bank) = &st.bank {
+            // The piano loaded before this output opened: it plays from the first buffer on.
+            let _ = banks.send(Arc::clone(bank));
+        }
+        st.session = Some(Session { running, info: info.clone(), commands, banks });
         self.midi.set(Some(midi));
         Ok(info)
     }
@@ -451,7 +555,8 @@ impl Engine {
             st.session.take()
         };
         self.midi.set(None);
-        if let Some(s) = old {
+        if let Some(mut s) = old {
+            s.banks.reclaim();
             s.running.stop();
             self.stats.running.store(false, Ordering::Release);
         }
@@ -794,6 +899,149 @@ mod tests {
             "Sound was stopped before it finished starting."
         );
         assert!(e.info().is_none());
+    }
+
+    /// An opener whose bank receiver the test keeps.
+    fn link_opener(
+        slot: Arc<Mutex<Option<crate::piano::BankReceiver>>>,
+    ) -> impl FnOnce(&StartConfig, &Arc<EngineStats>) -> Result<Opened, String> {
+        move |_cfg, _stats| {
+            let (out, inbox) = rings(8, 8);
+            *slot.lock().unwrap() = Some(inbox.banks);
+            let (running, info) = spawn_backend("fake", move |stop, ready| {
+                let _keep = (inbox.commands, inbox.midi);
+                let _ = ready.send(Ok(fake_info("fake")));
+                while !stop.load(Ordering::Acquire) {
+                    thread::park_timeout(Duration::from_millis(20));
+                }
+            })?;
+            Ok((running, info, out))
+        }
+    }
+
+    fn small_bank() -> Result<SampleBank, String> {
+        Ok(crate::piano::testing::grid_bank(0.1))
+    }
+
+    #[test]
+    fn the_piano_is_loading_until_a_load_ends() {
+        let e = Engine::new();
+        assert_eq!(e.piano_status(), PianoState::Loading);
+        let info = e.load_piano_with(small_bank).unwrap();
+        assert_eq!(info.samples, 120);
+        assert_eq!(e.piano_status(), PianoState::Ready);
+    }
+
+    #[test]
+    fn a_failed_load_says_why_and_can_be_tried_again() {
+        let e = Engine::new();
+        let err = e.load_piano_with(|| Err("No piano sounds found.".to_string())).unwrap_err();
+        assert_eq!(err, "No piano sounds found.");
+        assert_eq!(e.piano_status(), PianoState::Failed("No piano sounds found.".to_string()));
+        assert!(e.load_piano_with(small_bank).is_ok());
+        assert_eq!(e.piano_status(), PianoState::Ready);
+    }
+
+    #[test]
+    fn a_second_load_while_one_is_running_is_turned_away_and_status_does_not_wait() {
+        let e = Arc::new(Engine::new());
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        let (busy_tx, busy_rx) = mpsc::channel();
+        let e2 = Arc::clone(&e);
+        let first = thread::spawn(move || {
+            e2.load_piano_with(move || {
+                let _ = busy_tx.send(());
+                let _ = gate_rx.recv();
+                small_bank()
+            })
+        });
+        busy_rx.recv().unwrap(); // the first load is now decoding
+        assert_eq!(e.piano_status(), PianoState::Loading);
+        let second = e.load_piano_with(|| panic!("must not decode twice"));
+        assert_eq!(second.unwrap_err(), "The piano sound is already loading.");
+        gate_tx.send(()).unwrap();
+        assert!(first.join().unwrap().is_ok());
+        assert_eq!(e.piano_status(), PianoState::Ready);
+    }
+
+    #[test]
+    fn loading_again_after_success_does_not_decode_or_send_a_second_bank() {
+        let e = Engine::new();
+        let slot = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), link_opener(Arc::clone(&slot))).unwrap();
+        e.load_piano_with(small_bank).unwrap();
+        let again = e.load_piano_with(|| panic!("must not decode twice")).unwrap();
+        assert_eq!(again.samples, 120);
+        let mut link = slot.lock().unwrap().take().unwrap();
+        assert!(link.next_bank().is_some());
+        assert!(link.next_bank().is_none(), "only one bank is ever sent to an output");
+        e.stop();
+    }
+
+    #[test]
+    fn an_output_started_after_the_load_gets_the_bank() {
+        let e = Engine::new();
+        e.load_piano_with(small_bank).unwrap();
+        let slot = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), link_opener(Arc::clone(&slot))).unwrap();
+        let mut link = slot.lock().unwrap().take().unwrap();
+        assert_eq!(link.next_bank().expect("the bank is waiting").len(), 120);
+        // A restart builds a new output, which gets the bank again.
+        let slot2 = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), link_opener(Arc::clone(&slot2))).unwrap();
+        let mut link2 = slot2.lock().unwrap().take().unwrap();
+        assert!(link2.next_bank().is_some());
+        e.stop();
+    }
+
+    #[test]
+    fn a_bank_that_finishes_while_sound_runs_is_handed_over_once() {
+        let e = Engine::new();
+        let slot = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), link_opener(Arc::clone(&slot))).unwrap();
+        let mut link = slot.lock().unwrap().take().unwrap();
+        assert!(link.next_bank().is_none(), "nothing to hand over before the load ends");
+        e.load_piano_with(small_bank).unwrap();
+        assert_eq!(link.next_bank().expect("sent through the link").len(), 120);
+        assert!(link.next_bank().is_none());
+        e.stop();
+    }
+
+    #[test]
+    fn a_bank_that_finishes_while_an_output_is_still_opening_is_not_lost() {
+        let e = Arc::new(Engine::new());
+        let (gate_tx, gate_rx) = mpsc::channel();
+        let (open_tx, open_rx) = mpsc::channel();
+        let slot = Arc::new(Mutex::new(None));
+        let slot2 = Arc::clone(&slot);
+        let e2 = Arc::clone(&e);
+        let starting = thread::spawn(move || {
+            e2.start_with(&StartConfig::default(), move |cfg, stats| {
+                let _ = open_tx.send(());
+                let _ = gate_rx.recv();
+                link_opener(slot2)(cfg, stats)
+            })
+        });
+        open_rx.recv().unwrap();
+        e.load_piano_with(small_bank).unwrap();
+        gate_tx.send(()).unwrap();
+        starting.join().unwrap().unwrap();
+        let mut link = slot.lock().unwrap().take().unwrap();
+        assert!(link.next_bank().is_some());
+        assert!(link.next_bank().is_none(), "sent once, not twice");
+        e.stop();
+    }
+
+    #[test]
+    fn a_failed_load_leaves_sound_running_with_the_stand_in_voice() {
+        let e = Engine::new();
+        let slot = Arc::new(Mutex::new(None));
+        e.start_with(&StartConfig::default(), link_opener(Arc::clone(&slot))).unwrap();
+        e.load_piano_with(|| Err("The piano sound folder is missing.".to_string())).unwrap_err();
+        assert!(e.info().is_some());
+        let mut link = slot.lock().unwrap().take().unwrap();
+        assert!(link.next_bank().is_none());
+        e.stop();
     }
 
     #[test]

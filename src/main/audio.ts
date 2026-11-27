@@ -15,6 +15,14 @@ function addonFolder(): string {
     : join(app.getAppPath(), 'native', 'audio-engine')
 }
 
+// Where the piano sound files live. In development they are in assets/piano.
+// In the installed app they are copied to resources/piano by the installer.
+export function pianoFolder(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'piano')
+    : join(app.getAppPath(), 'assets', 'piano')
+}
+
 // Loads the Rust sound engine. If anything goes wrong it returns the reason instead of
 // throwing, so the app still opens and the Sound screen can explain.
 export function loadEngine(): LoadedEngine {

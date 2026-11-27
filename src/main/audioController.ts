@@ -7,6 +7,7 @@ import type {
   MidiStatus,
   MidiStatusReply,
   OutputDevice,
+  PianoSound,
   StartConfig,
   StartResult,
   StatusReply,
@@ -33,7 +34,12 @@ export type MidiEngine = {
   onMidiEvent(callback: (events: MidiEvent[]) => void): void
 }
 
-export type FullEngine = Engine & Partial<MidiEngine>
+// The piano sound part of the native addon. Also optional.
+export type PianoEngine = {
+  loadPiano(folder: string): Promise<{ samples: number; seconds: number }>
+}
+
+export type FullEngine = Engine & Partial<MidiEngine> & Partial<PianoEngine>
 
 function reason(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
@@ -45,18 +51,51 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
   const engine = source.engine
   const missing = source.loadError ?? 'The sound engine is not available.'
   const midiMissing = 'The piano part of the sound engine is not available.'
-  let current: AudioState = { phase: 'off' }
+  const pianoMissing = 'The piano sound is not part of this sound engine.'
+  // The sound output and the piano sound are separate: one can fail without the other.
+  let current: Omit<AudioState, 'piano' | 'pianoError'> = { phase: 'off' }
+  let piano: PianoSound = engine ? 'loading' : 'failed'
+  let pianoError: string | undefined = engine ? undefined : missing
+  let pianoLoading: Promise<void> | undefined
+
+  const view = (): AudioState => (pianoError ? { ...current, piano, pianoError } : { ...current, piano })
 
   return {
     state(): AudioState {
-      return current
+      return view()
+    },
+
+    // Loads the piano sound from `folder`. It never throws and never touches the sound output:
+    // if it fails, the simple tone keeps playing. A second call while loading waits for the first.
+    loadPiano(folder: string): Promise<void> {
+      if (pianoLoading) return pianoLoading
+      if (!engine) return Promise.resolve()
+      if (typeof engine.loadPiano !== 'function') {
+        piano = 'failed'
+        pianoError = pianoMissing
+        return Promise.resolve()
+      }
+      piano = 'loading'
+      pianoError = undefined
+      pianoLoading = engine.loadPiano(folder).then(
+        () => {
+          piano = 'ready'
+          pianoLoading = undefined
+        },
+        (error: unknown) => {
+          piano = 'failed'
+          pianoError = reason(error, 'The piano sound could not load.')
+          pianoLoading = undefined
+        }
+      )
+      return pianoLoading
     },
 
     async start(config: StartConfig): Promise<AudioState> {
-      if (current.phase === 'starting') return current
+      if (current.phase === 'starting') return view()
       if (!engine) {
         current = { phase: 'failed', error: missing }
-        return current
+        return view()
       }
       current = { phase: 'starting' }
       try {
@@ -64,7 +103,7 @@ export function createAudioController(source: { engine?: FullEngine; loadError?:
       } catch (error) {
         current = { phase: 'failed', error: reason(error, 'Sound could not start.') }
       }
-      return current
+      return view()
     },
 
     stop(): void {

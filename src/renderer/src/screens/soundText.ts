@@ -1,4 +1,4 @@
-import type { AudioState, MidiEvent, MidiStatusReply } from '../../../shared/audio'
+import type { AudioState, MidiEvent, MidiStatusReply, PianoSound } from '../../../shared/audio'
 
 // The way sound is played, in words a beginner can read.
 export function backendWords(backend: string): string {
@@ -72,3 +72,18 @@ export function lastKeyLine(event: MidiEvent | undefined): string {
   if (!event) return ''
   return `Last key: ${noteName(event.note)}, loudness ${event.velocity} of 127`
 }
+
+// The line about the sampled piano sound. Without it a simple tone plays.
+export function pianoSoundLine(piano: PianoSound): string {
+  switch (piano) {
+    case 'loading':
+      return 'Piano sound is loading…'
+    case 'ready':
+      return 'Piano sound is ready.'
+    case 'failed':
+      return 'Piano sound could not load. You hear a simple tone instead.'
+  }
+}
+
+// The thanks the sample licence asks for.
+export const PIANO_SOUND_CREDIT = 'Piano sound: Salamander Grand Piano by Alexander Holm (CC BY 3.0).'

@@ -5,10 +5,20 @@ import {
   backendWords,
   lastKeyLine,
   latestKeyDown,
+  PIANO_SOUND_CREDIT,
   pianoLine,
   pianoProblem,
+  pianoSoundLine,
   statusLine
 } from './soundText'
+
+// What the screen shows when the main process does not answer.
+const didNotAnswer = (now: AudioState): AudioState => ({
+  phase: 'failed',
+  error: 'The sound engine did not answer.',
+  piano: now.piano,
+  pianoError: now.pianoError
+})
 
 // Words and a shape for each phase, so colour is never the only signal.
 const badge = {
@@ -18,8 +28,15 @@ const badge = {
   failed: { label: 'Problem', glyph: '▲' }
 } as const
 
+// The same idea for the piano sound.
+const pianoSoundBadge = {
+  loading: { label: 'Loading', glyph: '…' },
+  ready: { label: 'Ready', glyph: '✓' },
+  failed: { label: 'Problem', glyph: '▲' }
+} as const
+
 export default function Sound() {
-  const [state, setState] = useState<AudioState>({ phase: 'starting' })
+  const [state, setState] = useState<AudioState>({ phase: 'starting', piano: 'loading' })
   const [beep, setBeep] = useState('')
   const busy = useRef(false)
   // undefined until the first answer from the main process.
@@ -66,7 +83,7 @@ export default function Sound() {
         if (!cancelled) setState(next)
       },
       () => {
-        if (!cancelled) setState({ phase: 'failed', error: 'The sound engine did not answer.' })
+        if (!cancelled) setState(didNotAnswer)
       }
     )
     return () => {
@@ -74,9 +91,10 @@ export default function Sound() {
     }
   }, [])
 
-  // While sound is still opening (it can take a while), keep asking.
+  // While sound is still opening or the piano sound is still loading (each can take a
+  // while), keep asking.
   useEffect(() => {
-    if (state.phase !== 'starting') return
+    if (state.phase !== 'starting' && state.piano !== 'loading') return
     let cancelled = false
     const timer = setTimeout(() => {
       window.pianoLearner.audio.state().then(
@@ -84,7 +102,7 @@ export default function Sound() {
           if (!cancelled) setState(next)
         },
         () => {
-          if (!cancelled) setState({ phase: 'failed', error: 'The sound engine did not answer.' })
+          if (!cancelled) setState(didNotAnswer)
         }
       )
     }, 500)
@@ -98,10 +116,10 @@ export default function Sound() {
     if (busy.current) return
     busy.current = true
     setBeep('')
-    setState({ phase: 'starting' })
+    setState((now) => ({ phase: 'starting', piano: now.piano, pianoError: now.pianoError }))
     window.pianoLearner.audio
       .start()
-      .then(setState, () => setState({ phase: 'failed', error: 'The sound engine did not answer.' }))
+      .then(setState, () => setState(didNotAnswer))
       .finally(() => {
         busy.current = false
       })
@@ -121,6 +139,7 @@ export default function Sound() {
   }
 
   const canPlay = state.phase === 'on'
+  const pianoSound = state.piano
   const result = state.result
   const connected = piano?.ok === true && piano.status.connected
   const pianoBadge = piano === undefined ? 'Checking' : connected ? 'Connected' : 'Not found'
@@ -198,6 +217,29 @@ export default function Sound() {
         <button type="button" className="button" onClick={reconnectPiano}>
           Reconnect piano
         </button>
+      </section>
+
+      <section className={styles.panel} aria-labelledby="piano-sound-title">
+        <h2 className={styles.sectionTitle} id="piano-sound-title">
+          Piano sound
+        </h2>
+        <p
+          className={`${styles.badge} ${pianoSound === 'ready' ? styles.on : ''} ${pianoSound === 'failed' ? styles.failed : ''}`}
+        >
+          <span aria-hidden="true" className={styles.glyph}>
+            {pianoSoundBadge[pianoSound].glyph}
+          </span>
+          {pianoSoundBadge[pianoSound].label}
+        </p>
+        <p className={styles.statusLine} role="status">
+          {pianoSoundLine(pianoSound)}
+        </p>
+        {pianoSound === 'failed' ? (
+          <p className={styles.reason}>
+            <strong>Reason:</strong> {state.pianoError ?? 'No reason was given.'}
+          </p>
+        ) : null}
+        <p className={styles.note}>{PIANO_SOUND_CREDIT}</p>
       </section>
 
       <section className={styles.panel} aria-labelledby="test-title">

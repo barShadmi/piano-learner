@@ -41,11 +41,16 @@ export type EngineStatus = {
   measuredLatencyMs: number
 }
 
-// What the Sound screen is told. `error` is plain English for Bar.
+// Whether the sampled piano sound has loaded. Until it has (or if it cannot), a simple tone plays.
+export type PianoSound = 'loading' | 'ready' | 'failed'
+
+// What the Sound screen is told. `error` and `pianoError` are plain English for Bar.
 export type AudioState = {
   phase: 'starting' | 'on' | 'off' | 'failed'
   result?: StartResult
   error?: string
+  piano: PianoSound
+  pianoError?: string
 }
 
 export type ListOutputsReply = { ok: true; outputs: OutputDevice[] } | { ok: false; error: string }

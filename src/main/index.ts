@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { isAppUrl } from './appUrl'
-import { loadEngine } from './audio'
+import { loadEngine, pianoFolder } from './audio'
 import { createAudioController } from './audioController'
 import { registerAudioIpc, sendMidiEvents } from './ipc'
 
@@ -141,6 +141,9 @@ if (!app.requestSingleInstanceLock()) {
       // Open the sound output after the window exists, so it never delays the window.
       // The result (or the reason it failed) is kept for the Sound screen.
       void audio.start({})
+      // Load the piano sound on a background thread. It does not wait for the output:
+      // until it is ready (and if it fails) a simple tone plays, and the Sound screen says so.
+      void audio.loadPiano(pianoFolder())
       // Start the piano watcher after the window exists. Key events go to the screen as they come.
       audio.startMidi(sendMidiEvents(() => mainWindow))
     })
