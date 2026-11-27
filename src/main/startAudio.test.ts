@@ -43,4 +43,10 @@ describe('startAudio', () => {
     await done
     expect(log).toEqual(['load /piano', 'load done', 'apply'])
   })
+
+  it('opens the sound anyway when the piano load takes too long', async () => {
+    const { audio, log } = fakeAudio('ok')
+    await startAudio(audio, settings, '/piano', 10)
+    expect(log).toEqual(['load /piano', 'apply'])
+  })
 })
