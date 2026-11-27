@@ -12,3 +12,14 @@ describe('screenFor', () => {
     expect(screenFor('#/nope')).toBe('not-found')
   })
 })
+
+describe('screenFor sound', () => {
+  it('shows the sound screen for #/sound', () => {
+    expect(screenFor('#/sound')).toBe('sound')
+  })
+
+  it('does not match look-alikes', () => {
+    expect(screenFor('#/sounds')).toBe('not-found')
+    expect(screenFor('#/sound/x')).toBe('not-found')
+  })
+})

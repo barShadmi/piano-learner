@@ -13,3 +13,5 @@ screens-out
 *.key
 *.cer
 .claude/settings.local.json
+native/audio-engine/target/
+*.node

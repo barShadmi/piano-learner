@@ -8,21 +8,26 @@ export default function Library() {
         <h1 className={styles.title} id="songs-title">
           Your songs
         </h1>
-        <div className={styles.action}>
-          {/* Phase 2: wire up import. Drop aria-disabled and the hint below, and change the
-              second panel line to "Import sheet music (a photo or PDF), a MIDI or MusicXML
-              file, or a falling-note video to start playing." */}
-          <button
-            type="button"
-            className="button"
-            aria-disabled="true"
-            aria-describedby="import-soon"
-          >
-            Import file
-          </button>
-          <p className={styles.hint} id="import-soon">
-            Importing arrives in a later update.
-          </p>
+        <div className={styles.actions}>
+          <div className={styles.action}>
+            {/* Phase 2: wire up import. Drop aria-disabled and the hint below, and change the
+                second panel line to "Import sheet music (a photo or PDF), a MIDI or MusicXML
+                file, or a falling-note video to start playing." */}
+            <button
+              type="button"
+              className="button"
+              aria-disabled="true"
+              aria-describedby="import-soon"
+            >
+              Import file
+            </button>
+            <p className={styles.hint} id="import-soon">
+              Importing arrives in a later update.
+            </p>
+          </div>
+          <a href="#/sound" className="button">
+            Sound
+          </a>
         </div>
       </div>
       <section className={styles.panel} aria-labelledby="songs-title">

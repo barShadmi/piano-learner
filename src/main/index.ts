@@ -2,6 +2,9 @@ import { app, BrowserWindow, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { isAppUrl } from './appUrl'
+import { loadEngine } from './audio'
+import { createAudioController } from './audioController'
+import { registerAudioIpc } from './ipc'
 
 // These three are for development and the screenshot script only.
 // A packaged app ignores them, so nobody can steer an installed app with them.
@@ -21,6 +24,9 @@ const rendererFileUrl = pathToFileURL(rendererFile).href
 const appUrlConfig = { rendererUrl, rendererFileUrl }
 
 let mainWindow: BrowserWindow | null = null
+
+// Loading can fail (no engine file). The controller then reports it and the app still opens.
+const audio = createAudioController(loadEngine())
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -130,13 +136,21 @@ if (!app.requestSingleInstanceLock()) {
       })
 
       if (app.isPackaged) Menu.setApplicationMenu(null)
+      registerAudioIpc(audio)
       createWindow()
+      // Open the sound output after the window exists, so it never delays the window.
+      // The result (or the reason it failed) is kept for the Sound screen.
+      void audio.start({})
     })
     .catch((error: unknown) => {
       console.error('The app could not start:', error)
       app.quit()
     })
 }
+
+app.on('before-quit', () => {
+  audio.stop()
+})
 
 app.on('window-all-closed', () => {
   app.quit()

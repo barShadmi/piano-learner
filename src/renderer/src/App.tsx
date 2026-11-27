@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Library from './screens/Library'
 import NotFound from './screens/NotFound'
+import Sound from './screens/Sound'
 import { screenFor } from './routes'
 
 export default function App() {
@@ -12,5 +13,8 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  return screenFor(hash) === 'library' ? <Library /> : <NotFound />
+  const screen = screenFor(hash)
+  if (screen === 'library') return <Library />
+  if (screen === 'sound') return <Sound />
+  return <NotFound />
 }

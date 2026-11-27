@@ -2,7 +2,7 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 
 export default tseslint.config(
-  { ignores: ['out', 'dist', 'release', 'node_modules', '.claude'] },
+  { ignores: ['out', 'dist', 'release', 'node_modules', '.claude', 'native/audio-engine/index.d.ts', 'native/audio-engine/target', 'native/audio-engine/node_modules'] },
   ...tseslint.configs.recommended,
   {
     files: ['**/*.{ts,tsx}'],
