@@ -8,6 +8,7 @@ import { keyboardLayout } from '../keyboard/layout'
 import type { Hand } from '../../../shared/song/types'
 import type { SongClock } from './clock'
 import { parseHex, pickTextColour } from './colors'
+import { chooseLabel, type LabelSizes } from './label'
 import { SoundingTracker } from './sounding'
 import type { NoteTiming, TimedNotes } from './songTime'
 import { visibleFrom, visibleRange, visibleTo } from './visible'
@@ -15,9 +16,18 @@ import styles from './FallingNotes.module.css'
 
 export const LOOKAHEAD_S = 3
 const FONT_NAME = 'NoteLabel'
-// A label is shown on notes down to this size, scaled to fit. Colour is never the only signal.
-const MIN_LABEL_PX = 9
-const FULL_LABEL_PX = 14
+// The label font is drawn at this size once, then set to the token sizes. Glyph widths are measured at it.
+const FONT_BASE_PX = 32
+const LABEL_CHARS = '0123456789RL'
+// Width of each label character at FONT_BASE_PX, measured once after the font is installed.
+const glyphWidth = new Float64Array(128)
+let glyphsMeasured = false
+// How wide a label text is at a font size. Reads the table, makes nothing.
+const labelTextWidth = (text: string, size: number): number => {
+  let w = 0
+  for (let i = 0; i < text.length; i++) w += glyphWidth[text.charCodeAt(i)]
+  return (w * size) / FONT_BASE_PX
+}
 // The label font is installed once for the whole app run (the colour is a tint, so a theme change needs no new font).
 let fontInstalled = false
 const WHITE_KEYS = 52
@@ -54,6 +64,8 @@ type Theme = {
   line: number
   radius: number
   font: string
+  // Label sizes and inset from the tokens (--text-md, --text-sm, --space-1), in px.
+  labels: LabelSizes
 }
 
 type Props = {
@@ -80,6 +92,9 @@ function readTheme(): Theme | undefined {
   const line = parseHex(cssValue('--border'))
   const radius = parseFloat(cssValue('--radius-1'))
   const font = cssValue('--font-sans')
+  const textMd = parseFloat(cssValue('--text-md'))
+  const textSm = parseFloat(cssValue('--text-sm'))
+  const space1 = parseFloat(cssValue('--space-1'))
   if (
     right === undefined ||
     left === undefined ||
@@ -87,6 +102,9 @@ function readTheme(): Theme | undefined {
     text === undefined ||
     line === undefined ||
     !Number.isFinite(radius) ||
+    !Number.isFinite(textMd) ||
+    !Number.isFinite(textSm) ||
+    !Number.isFinite(space1) ||
     font === ''
   ) {
     return undefined
@@ -99,7 +117,13 @@ function readTheme(): Theme | undefined {
     edge: surface,
     line,
     radius,
-    font
+    font,
+    labels: {
+      md: textMd,
+      sm: textSm,
+      inset: space1,
+      textWidth: labelTextWidth
+    }
   }
 }
 
@@ -166,10 +190,26 @@ export default function FallingNotes({ timed, clock, onSounding, endS, onEnd }: 
       if (!fontInstalled) {
         BitmapFont.install({
           name: FONT_NAME,
-          style: { fontFamily: theme.font, fontSize: 32, fontWeight: '700', fill: 0xffffff },
+          style: {
+            fontFamily: theme.font,
+            fontSize: FONT_BASE_PX,
+            fontWeight: '700',
+            fill: 0xffffff
+          },
           chars: [['0', '9'], 'RL']
         })
         fontInstalled = true
+      }
+      if (!glyphsMeasured) {
+        for (const c of LABEL_CHARS) {
+          const probe = new BitmapText({
+            text: c,
+            style: { fontFamily: FONT_NAME, fontSize: FONT_BASE_PX }
+          })
+          glyphWidth[c.charCodeAt(0)] = probe.width
+          probe.destroy()
+        }
+        glyphsMeasured = true
       }
 
       wrap.appendChild(app.canvas)
@@ -190,12 +230,25 @@ export default function FallingNotes({ timed, clock, onSounding, endS, onEnd }: 
         for (let i = 0; i < poolSize; i++) {
           const box = new Container()
           const g = new Graphics()
-          const label = new BitmapText({ text: '', style: { fontFamily: FONT_NAME, fontSize: 12 } })
+          const label = new BitmapText({
+            text: '',
+            style: { fontFamily: FONT_NAME, fontSize: FONT_BASE_PX }
+          })
           label.anchor.set(0.5, 1)
           box.addChild(g, label)
           box.visible = false
           whiteLayer.addChild(box)
-          slots.push({ box, g, label, note: null, seen: false, w: -1, h: -1, version: -1, black: 0 })
+          slots.push({
+            box,
+            g,
+            label,
+            note: null,
+            seen: false,
+            w: -1,
+            h: -1,
+            version: -1,
+            black: 0
+          })
         }
       }
       ensurePool(maxVisible(timed))
@@ -251,7 +304,10 @@ export default function FallingNotes({ timed, clock, onSounding, endS, onEnd }: 
         linesDirty = true
         dirty = true
       })
-      themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme']
+      })
 
       // Draw one note's rectangle (and its label) into its slot. Only when something about it changed.
       const restyle = (s: Slot, n: NoteTiming, w: number, h: number): void => {
@@ -263,14 +319,14 @@ export default function FallingNotes({ timed, clock, onSounding, endS, onEnd }: 
         const r = Math.max(0, Math.min(t.radius, w / 2, h / 2))
         s.g.clear()
         s.g.roundRect(0, 0, w, h, r).fill(colour).stroke({ width: 1, color: t.edge, alignment: 1 })
-        const showLabel = w >= MIN_LABEL_PX && h >= MIN_LABEL_PX
-        s.label.visible = showLabel
-        if (showLabel) {
-          s.label.text = n.finger !== undefined ? String(n.finger) : n.hand === 'right' ? 'R' : 'L'
+        const choice = chooseLabel(n.hand, n.finger, w, h, t.labels)
+        s.label.visible = choice !== undefined
+        if (choice !== undefined) {
+          s.label.text = choice.text
+          s.label.style.fontSize = choice.size
           s.label.tint = n.hand === 'right' ? t.rightText : t.leftText
-          s.label.scale.set(Math.min(1, w / FULL_LABEL_PX, h / FULL_LABEL_PX))
           s.label.x = w / 2
-          s.label.y = h - 2
+          s.label.y = h - t.labels.inset
         }
       }
 
@@ -370,7 +426,11 @@ export default function FallingNotes({ timed, clock, onSounding, endS, onEnd }: 
 
   return (
     <div className={styles.wrap} ref={wrapRef} data-frames="0" data-fps="0">
-      {failed ? <p className={styles.failed}>The falling notes could not start on this PC.</p> : null}
+      {failed ? (
+        <p className={styles.failed}>
+          The falling notes could not start on this PC. Restart the app. You can still play and hear the piano.
+        </p>
+      ) : null}
     </div>
   )
 }
