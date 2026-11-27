@@ -66,6 +66,39 @@ describe('Keyboard', () => {
     expect(key(48)?.textContent).toContain('L')
   })
 
+  it('shows an R or L on a lit black key too, so the hand is not colour only', async () => {
+    // 61 is C♯4 and 70 is A♯4: both black keys.
+    await show(
+      new Map<number, 'pressed' | 'right' | 'left'>([
+        [61, 'right'],
+        [70, 'left']
+      ])
+    )
+    expect(key(61)?.getAttribute('data-black')).toBe('true')
+    expect(key(61)?.getAttribute('data-state')).toBe('right')
+    expect(key(61)?.textContent).toContain('R')
+    expect(key(70)?.getAttribute('data-black')).toBe('true')
+    expect(key(70)?.getAttribute('data-state')).toBe('left')
+    expect(key(70)?.textContent).toContain('L')
+  })
+
+  it('draws a hand bar on every lit key, white and black', async () => {
+    await show(
+      new Map<number, 'pressed' | 'right' | 'left'>([
+        [72, 'right'],
+        [61, 'left']
+      ])
+    )
+    expect(key(72)?.querySelector('[data-bar]')).not.toBeNull()
+    expect(key(61)?.querySelector('[data-bar]')).not.toBeNull()
+  })
+
+  it('draws no hand bar on an unlit key or on a pressed key', async () => {
+    await show(new Map([[60, 'pressed']]))
+    expect(key(60)?.querySelector('[data-bar]')).toBeNull()
+    expect(key(64)?.querySelector('[data-bar]')).toBeNull()
+  })
+
   it('labels every C and marks middle C', async () => {
     await show()
     const text = host.textContent ?? ''

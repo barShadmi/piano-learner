@@ -14,7 +14,7 @@ Tags: (B) builder, (B+) builder-plus, (L) lead. `hard` steps go straight to buil
 - [x] Import MIDI and MusicXML files; Listen mode plays a song (B) [test-driven-development]
 
 ## Gate
-- [ ] Review board passed (no Blocking item left)
+- [x] Review board passed (no Blocking item left)
 - [ ] Bar: Play the P-121 and hear it in your headphones with no lag you can feel
 - [ ] Bar: The latency report shows under 10 ms
 - [ ] Bar: A song plays with falling notes

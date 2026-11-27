@@ -42,47 +42,53 @@ function makeSong(title: string, noteCount = 2, id = 'importer-id'): Song {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 describe('listSongs', () => {
-  it('gives an empty list when no song has been saved yet', () => {
-    expect(listSongs(dir)).toEqual([])
+  it('reads the songs without blocking: listSongs returns a promise', async () => {
+    const listing = listSongs(dir)
+    expect(listing).toBeInstanceOf(Promise)
+    await listing
   })
 
-  it('lists a saved song with its title, composer and note count', () => {
+  it('gives an empty list when no song has been saved yet', async () => {
+    expect(await listSongs(dir)).toEqual([])
+  })
+
+  it('lists a saved song with its title, composer and note count', async () => {
     const saved = saveSong(dir, makeSong('Tune', 3))
-    expect(listSongs(dir)).toEqual([{ id: saved.id, title: 'Tune', composer: 'A Composer', noteCount: 3 }])
+    expect(await listSongs(dir)).toEqual([{ id: saved.id, title: 'Tune', composer: 'A Composer', noteCount: 3 }])
   })
 
-  it('sorts the songs by title', () => {
+  it('sorts the songs by title', async () => {
     saveSong(dir, makeSong('Zebra'))
     saveSong(dir, makeSong('apple'))
     saveSong(dir, makeSong('Mango'))
-    expect(listSongs(dir).map((s) => s.title)).toEqual(['apple', 'Mango', 'Zebra'])
+    expect((await listSongs(dir)).map((s) => s.title)).toEqual(['apple', 'Mango', 'Zebra'])
   })
 
-  it('skips files that are not named <uuid>.json', () => {
+  it('skips files that are not named <uuid>.json', async () => {
     saveSong(dir, makeSong('Kept'))
     writeFileSync(join(dir, 'notes.json'), JSON.stringify(makeSong('Wrong name')), 'utf8')
     writeFileSync(join(dir, 'canon-opening.json'), JSON.stringify(makeSong('Wrong name 2')), 'utf8')
-    expect(listSongs(dir).map((s) => s.title)).toEqual(['Kept'])
+    expect((await listSongs(dir)).map((s) => s.title)).toEqual(['Kept'])
   })
 
-  it('skips a file that is broken JSON', () => {
+  it('skips a file that is broken JSON', async () => {
     saveSong(dir, makeSong('Kept'))
     writeFileSync(join(dir, '6f1c2a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6.json'), '{ not json', 'utf8')
-    expect(listSongs(dir).map((s) => s.title)).toEqual(['Kept'])
+    expect((await listSongs(dir)).map((s) => s.title)).toEqual(['Kept'])
   })
 
-  it('skips a file whose song fails validateSong', () => {
+  it('skips a file whose song fails validateSong', async () => {
     saveSong(dir, makeSong('Kept'))
     const bad = { ...makeSong('Broken'), title: '' }
     writeFileSync(join(dir, '6f1c2a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6.json'), JSON.stringify(bad), 'utf8')
-    expect(listSongs(dir).map((s) => s.title)).toEqual(['Kept'])
+    expect((await listSongs(dir)).map((s) => s.title)).toEqual(['Kept'])
   })
 
-  it('skips a file whose song id does not match its file name', () => {
+  it('skips a file whose song id does not match its file name', async () => {
     saveSong(dir, makeSong('Kept'))
     const moved = makeSong('Moved', 1, 'some-other-id')
     writeFileSync(join(dir, '6f1c2a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6.json'), JSON.stringify(moved), 'utf8')
-    expect(listSongs(dir).map((s) => s.title)).toEqual(['Kept'])
+    expect((await listSongs(dir)).map((s) => s.title)).toEqual(['Kept'])
   })
 })
 
@@ -93,11 +99,11 @@ describe('saveSong', () => {
     expect(saved.id).not.toBe('importer-id')
   })
 
-  it('gives every saved copy of the same song its own id', () => {
+  it('gives every saved copy of the same song its own id', async () => {
     const first = saveSong(dir, makeSong('Tune'))
     const second = saveSong(dir, makeSong('Tune'))
     expect(first.id).not.toBe(second.id)
-    expect(listSongs(dir)).toHaveLength(2)
+    expect(await listSongs(dir)).toHaveLength(2)
   })
 
   it('leaves only the song file behind, with no temporary file', () => {
@@ -111,10 +117,10 @@ describe('saveSong', () => {
     expect(() => readdirSync(dir)).toThrow()
   })
 
-  it('creates the songs folder when it is missing', () => {
+  it('creates the songs folder when it is missing', async () => {
     mkdirSync(root, { recursive: true })
     expect(() => saveSong(dir, makeSong('Tune'))).not.toThrow()
-    expect(listSongs(dir)).toHaveLength(1)
+    expect(await listSongs(dir)).toHaveLength(1)
   })
 })
 

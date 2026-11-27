@@ -60,6 +60,11 @@ impl Sleeper {
         }
     }
 
+    /// Whether the song thread got the high-resolution timer (true only between `thread_begin` and `thread_end`).
+    pub fn has_high_res_timer(&self) -> bool {
+        self.timer.lock().unwrap_or_else(PoisonError::into_inner).raw != 0
+    }
+
     pub fn thread_end(&self) {
         let mut t = self.timer.lock().unwrap_or_else(PoisonError::into_inner);
         if t.raw != 0 {

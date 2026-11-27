@@ -114,7 +114,7 @@ describe('createAudioController', () => {
   it('plays the test tone only when sound is on', async () => {
     const engine = fakeEngine()
     const c = createAudioController({ engine })
-    expect(c.testTone({})).toEqual({ ok: false, error: 'Sound is not on yet.' })
+    expect(c.testTone({})).toEqual({ ok: false, error: 'Sound is off. Press Open Sound to turn it on.' })
     expect(engine.toneCalls).toBe(0)
     await c.start({})
     expect(c.testTone({})).toEqual({ ok: true })
@@ -487,7 +487,7 @@ describe('createAudioController delay test', () => {
     const report = c.latencyReport(now)
     expect(report).toEqual({ ok: true, text: expect.any(String), json: expect.any(String) })
     if (!report.ok) throw new Error('expected a report')
-    expect(report.text).toContain('About 4.2 ms from key to sound')
+    expect(report.text).toContain('Typical key: about 4.2 ms.')
     expect(JSON.parse(report.json)).toMatchObject({ savedAt: '2026-11-27T13:50:00.000Z', verdict: 'good' })
   })
 
@@ -821,7 +821,7 @@ describe('createAudioController song player', () => {
   it('says sound is not on yet instead of playing into nothing', () => {
     const song = fakeSong()
     const c = createAudioController({ engine: { ...fakeEngine(), ...song } })
-    expect(c.playSong(songEvents, 0)).toEqual({ ok: false, error: 'Sound is not on yet.' })
+    expect(c.playSong(songEvents, 0)).toEqual({ ok: false, error: 'Sound is off. Press Open Sound to turn it on.' })
     expect(song.played).toEqual([])
   })
 
@@ -846,7 +846,7 @@ describe('createAudioController song player', () => {
 
   it('says the sound engine is missing when there is none', () => {
     const c = createAudioController({ loadError: 'No engine here.' })
-    expect(c.playSong(songEvents, 0)).toEqual({ ok: false, error: 'Sound is not on yet.' })
+    expect(c.playSong(songEvents, 0)).toEqual({ ok: false, error: 'Sound is off. Press Open Sound to turn it on.' })
     expect(c.songPosition()).toEqual({ ok: false, error: 'No engine here.' })
     expect(c.stopSong()).toEqual({ ok: true })
   })

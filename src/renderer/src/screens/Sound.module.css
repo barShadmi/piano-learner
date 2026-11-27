@@ -81,10 +81,15 @@
   line-height: 1;
 }
 
+/* The word is in the ink colour, which reads well on the soft green. The green stays on the edge and the glyph. */
 .on {
   background: var(--correct-soft);
-  color: var(--correct);
+  color: var(--text);
   border-color: var(--correct);
+}
+
+.on .glyph {
+  color: var(--correct);
 }
 
 .failed {

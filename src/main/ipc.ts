@@ -24,7 +24,7 @@ export interface SongsIpcOptions {
 // The song library questions. The renderer never gives a path: the import dialog is opened here,
 // and a song is only read by its id (checked to be a UUID).
 export function registerSongsIpc({ folder, chooseFile, importFile }: SongsIpcOptions): void {
-  ipcMain.handle('songs:list', (): SongSummary[] => listSongs(folder))
+  ipcMain.handle('songs:list', async (): Promise<SongSummary[]> => listSongs(folder))
   ipcMain.handle('songs:get', (_event, id: unknown): SongGetReply => {
     const song = isSongId(id) ? getSong(folder, id) : undefined
     return song ? { ok: true, song } : { ok: false, error: 'This song could not be found.' }
@@ -52,7 +52,7 @@ export function registerAudioIpc(audio: AudioController, currentSettings: () => 
   ipcMain.handle('audio:start', (_event, input: unknown) => {
     if (input === undefined || input === null) return audio.retry(currentSettings())
     const parsed = parseStartConfig(input)
-    if (!parsed.ok) return { phase: 'failed', error: parsed.error }
+    if (!parsed.ok) return { phase: 'failed', error: parsed.error, piano: audio.state().piano }
     return audio.start(parsed.value)
   })
   // The volume while Bar drags the slider. It only changes the level; the saved setting is written by settings:set.

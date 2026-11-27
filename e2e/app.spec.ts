@@ -26,7 +26,7 @@ test('the app opens to the Your songs screen', async () => {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
 
-    expect(await window.title()).toBe('PianoLearner')
+    expect(await window.title()).toBe('Your songs · PianoLearner')
     await expect(window.getByRole('heading', { name: 'Your songs' })).toBeVisible()
   } finally {
     await app.close()
@@ -120,6 +120,9 @@ test('the Sound screen opens from the library, says sound state, and goes back',
     await window.keyboard.press('Enter')
 
     await expect(window.getByRole('heading', { name: 'Sound', level: 1 })).toBeVisible()
+    // A route change sets the window title and moves focus to the screen's h1.
+    await expect(window.getByRole('heading', { name: 'Sound', level: 1 })).toBeFocused()
+    expect(await window.title()).toBe('Sound · PianoLearner')
     // This container has no sound card, so sound ends up "could not start" (not a crash).
     // On a machine with sound it ends up "on". Either way it leaves "Starting".
     await expect(window.getByText(/^Sound (could not start|is on)\./)).toBeVisible({
@@ -133,9 +136,10 @@ test('the Sound screen opens from the library, says sound state, and goes back',
     ).toBeVisible()
 
     // This container has no MIDI ports, so the piano shows as not found.
+    await expect(window.getByText('No piano found.', { exact: true })).toBeVisible({ timeout: 10_000 })
     await expect(
-      window.getByText('No piano found. Check that the piano is on and the USB cable is plugged in.')
-    ).toBeVisible({ timeout: 10_000 })
+      window.getByText('Check that the piano is on and the USB cable is plugged in.', { exact: true })
+    ).toBeVisible()
     await expect(window.getByRole('button', { name: 'Reconnect piano' })).toBeVisible()
 
     const play = window.getByRole('button', { name: 'Play test sound' })
@@ -158,8 +162,8 @@ test('the Play screen opens from the library, shows 88 keys, and goes back by ke
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
 
-    await window.getByRole('link', { name: 'Play the piano' }).click()
-    await expect(window.getByRole('heading', { name: 'Play', level: 1 })).toBeVisible()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
     await expect(window.getByRole('img', { name: 'Piano keyboard' })).toBeVisible()
     await expect(window.locator('[data-note]')).toHaveCount(88)
@@ -183,11 +187,11 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     // Open, leave and open again: the view starts cleanly a second time.
-    await window.getByRole('link', { name: 'Play the piano' }).click()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
     await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
     await window.getByRole('link', { name: 'Back to your songs' }).click()
-    await window.getByRole('link', { name: 'Play the piano' }).click()
-    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
     await expect(window.getByText('The falling notes could not start on this PC.')).toHaveCount(0)
 
     const notes = window.locator('[data-frames]')
@@ -209,7 +213,7 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
     }))
     expect(widths.canvas).toBe(widths.keyboard)
 
-    await window.getByRole('button', { name: 'Start', exact: true }).click()
+    await window.getByRole('button', { name: 'Watch (no sound)' }).click()
     const before = await frames()
     // At least 30 frames a second: 45 new frames within 1.5 s of drawing, polled because
     // the count is only written twice a second.
@@ -235,8 +239,8 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
     expect(await lit()).toBe(pausedLit)
     expect(await frames()).toBe(pausedFrames)
 
-    // Back to the start: nothing is lit (the song begins 2 s before its first note).
-    await window.getByRole('button', { name: 'Back to the start' }).click()
+    // Restart song: nothing is lit (the song begins 2 s before its first note).
+    await window.getByRole('button', { name: 'Restart song' }).click()
     await expect.poll(lit).toBe('')
 
     // Screenshots 4 s into the song, in both themes.
@@ -245,8 +249,8 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
       await window.evaluate((t) => {
         document.documentElement.dataset.theme = t
       }, theme)
-      await window.getByRole('button', { name: 'Back to the start' }).click()
-      await window.getByRole('button', { name: 'Start', exact: true }).click()
+      await window.getByRole('button', { name: 'Restart song' }).click()
+      await window.getByRole('button', { name: 'Watch (no sound)' }).click()
       await window.waitForTimeout(4000)
       await expect.poll(async () => (await lit()) !== '').toBe(true)
       if (shots) await window.screenshot({ path: path.join(shots, `falling-${theme}.png`) })
@@ -263,20 +267,27 @@ test('Listen asks for the song to be heard; with no sound it says why and the fa
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
-    await window.getByRole('link', { name: 'Play the piano' }).click()
-    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
     await expect(window.getByRole('button', { name: 'Listen', exact: true })).toBeVisible()
     const frames = async (): Promise<number> =>
       Number(await window.locator('[data-frames]').getAttribute('data-frames'))
     await expect.poll(frames, { timeout: 15_000 }).toBeGreaterThan(0)
 
+    // Before any press: nothing is playing, so Pause is off and nothing is pressed.
+    await expect(window.getByRole('button', { name: 'Pause' })).toHaveAttribute('aria-disabled', 'true')
+    await expect(window.getByRole('button', { name: 'Listen', exact: true })).toHaveAttribute('aria-pressed', 'false')
+
     // This container has no sound card, so the engine is not on and the song cannot be heard.
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })).toBeVisible({
       timeout: 10_000
     })
-    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveAttribute('href', '#/sound')
+    await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveAttribute('href', '#/sound')
+    // The song runs without sound: Watch shows as the mode that is on and Pause works.
+    await expect(window.getByRole('button', { name: 'Watch (no sound)' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(window.getByRole('button', { name: 'Pause' })).toHaveAttribute('aria-disabled', 'false')
 
     // The notes keep falling without sound.
     const before = await frames()
@@ -291,45 +302,46 @@ test('Listen asks for the song to be heard; with no sound it says why and the fa
 })
 
 // The sample starts 2 s before its first note, so Listen begins in the lead-in: the engine start waits 2 s.
-test('Start during Listen silences it: a waiting start is cancelled and no sound message appears', async () => {
+test('Watch during Listen silences it: a waiting start is cancelled and no sound message appears', async () => {
   test.setTimeout(60_000)
   const app = await launch()
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
-    await window.getByRole('link', { name: 'Play the piano' }).click()
-    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
+    // This container has no sound card, so the engine is off. Watch right after Listen cancels the pending
+    // start, so the engine's answer is ignored and no sound message stays.
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Listening…' })).toBeVisible()
-    await window.getByRole('button', { name: 'Start', exact: true }).click()
+    await window.getByRole('button', { name: 'Watch (no sound)' }).click()
 
-    // Waiting past the lead-in: the cancelled start never reaches the engine, so nothing is reported.
-    await expect(window.getByRole('status').filter({ hasText: 'Listening…' })).toHaveCount(0)
+    // It never says "Playing with sound." (the sound is off), and nothing is reported after Watch.
+    await expect(window.getByRole('status').filter({ hasText: 'Playing with sound.' })).toHaveCount(0)
     await window.waitForTimeout(3000)
-    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
-    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveCount(0)
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })).toHaveCount(0)
+    await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveCount(0)
   } finally {
     await app.close()
   }
 })
 
-test('Start clears the sound message that Listen showed', async () => {
+test('Watch clears the sound message that Listen showed', async () => {
   test.setTimeout(60_000)
   const app = await launch()
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
-    await window.getByRole('link', { name: 'Play the piano' }).click()
-    await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
+    await window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true }).click()
+    await expect(window.getByRole('heading', { name: 'Canon in D (opening)', level: 1 })).toBeVisible()
 
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })).toBeVisible({
       timeout: 10_000
     })
-    await window.getByRole('button', { name: 'Start', exact: true }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
-    await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveCount(0)
+    await window.getByRole('button', { name: 'Watch (no sound)' }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })).toHaveCount(0)
+    await expect(window.getByRole('link', { name: 'Open Sound' })).toHaveCount(0)
   } finally {
     await app.close()
   }
@@ -350,6 +362,10 @@ test('the Delay test opens from Sound, says there is no piano, and saves a repor
     await expect(window.getByRole('button', { name: 'Reconnect piano' })).toBeVisible()
     await expect(window.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
     await expect(window.getByRole('progressbar')).toHaveAttribute('aria-valuemax', '20')
+    // No key has been timed yet, so Start over and Save report are off and say why.
+    await expect(window.getByRole('button', { name: 'Start over' })).toHaveAttribute('aria-disabled', 'true')
+    await expect(window.getByRole('button', { name: 'Save report' })).toHaveAttribute('aria-disabled', 'true')
+    await expect(window.getByText('Play a key first.', { exact: true })).toBeVisible()
 
     const saved = await window.evaluate(async () => {
       const latency = (
@@ -480,7 +496,8 @@ test('Import file adds a MIDI song to the library, and it opens on Play', async 
     await expect(row).toBeVisible()
     await expect(window.getByRole('link', { name: 'Play E2E Tune', exact: true })).toBeVisible()
     await expect(window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true })).toBeVisible()
-    await expect(window.getByRole('listitem').first()).toContainText('Canon in D (opening) · sample')
+    await expect(window.getByRole('listitem').first()).toContainText('Canon in D (opening)')
+    await expect(window.getByRole('listitem').first()).toContainText('Sample')
 
     // Screenshots of the library with the sample and one imported song, in both themes.
     const shots = process.env['LIBRARY_SHOTS']
@@ -492,7 +509,7 @@ test('Import file adds a MIDI song to the library, and it opens on Play', async 
     }
 
     await row.getByRole('link', { name: 'Play E2E Tune', exact: true }).click()
-    await expect(window.getByText('Song: E2E Tune')).toBeVisible()
+    await expect(window.getByRole('heading', { name: 'E2E Tune', level: 1 })).toBeVisible()
   } finally {
     await app.close()
     fs.rmSync(fixtures, { recursive: true, force: true })
@@ -532,5 +549,64 @@ test('a song that is not in the library says so on Play, with a way back', async
     await expect(window.getByRole('heading', { name: 'Your songs' })).toBeVisible()
   } finally {
     await app.close()
+  }
+})
+
+// A title of about 150 characters, for the smallest-window test.
+const LONG_TITLE =
+  'A very long song title that goes on and on to see that the heading is cut to one line with an ellipsis and the falling notes keep their room on a small window'
+
+test('at the smallest window the falling notes area is at least 240 px tall', async () => {
+  const fixtures = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-fixture-'))
+  const midi = new Midi()
+  const track = midi.addTrack()
+  track.name = LONG_TITLE
+  track.addNote({ midi: 60, time: 0, duration: 1 })
+  const midiFile = path.join(fixtures, 'long.mid')
+  fs.writeFileSync(midiFile, Buffer.from(midi.toArray()))
+  const app = await launch(undefined, { PIANO_LEARNER_E2E: '1', PIANO_LEARNER_E2E_IMPORT: midiFile })
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(1024, 640)
+    })
+    await window.getByRole('button', { name: 'Import file' }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Added' })).toBeVisible({ timeout: 20_000 })
+    await window.getByRole('link', { name: `Play ${LONG_TITLE}`, exact: true }).click()
+    await expect(window.locator('[data-frames] canvas')).toHaveCount(1)
+    await window.waitForTimeout(500)
+    // The long title is cut to 1 line, the full title is in the title attribute, the back link stays on one line.
+    const heading = window.getByRole('heading', { level: 1 })
+    await expect(heading).toHaveAttribute('title', LONG_TITLE)
+    const lines = await heading.evaluate((el) => {
+      const lh = parseFloat(getComputedStyle(el).lineHeight)
+      return Math.round(el.getBoundingClientRect().height / lh)
+    })
+    expect(lines).toBeLessThanOrEqual(1)
+    const back = await window.getByRole('link', { name: 'Back to your songs' }).boundingBox()
+    expect(back!.height).toBeLessThan(56)
+    const area = (): Promise<number> =>
+      window.locator('[data-frames]').evaluate((el) => el.getBoundingClientRect().height)
+    const idle = await area()
+    expect(idle).toBeGreaterThanOrEqual(240)
+    // A failed Listen shows its reason and the Open Sound link: the area must not move.
+    await window.getByRole('button', { name: 'Listen', exact: true }).click()
+    await expect(window.getByRole('link', { name: 'Open Sound' })).toBeVisible({ timeout: 10_000 })
+    expect(await area()).toBe(idle)
+    // A long engine message (69 characters) still fits on its one row.
+    await window
+      .getByRole('status')
+      .filter({ hasText: 'Sound is off. Press Open Sound to turn it on.' })
+      .evaluate((el) => {
+        el.textContent = 'Your saved sound output was not found, so the default output is used.'
+      })
+    expect(await area()).toBe(idle)
+    // The hint stays visible.
+    await expect(window.getByText('Listen plays the song with sound. Watch shows the notes only.')).toBeVisible()
+    console.log(`falling area with long title: idle ${idle}`)
+  } finally {
+    await app.close()
+    fs.rmSync(fixtures, { recursive: true, force: true })
   }
 })

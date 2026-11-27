@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { screenFor, songIdFor } from './routes'
+import { documentTitle, screenFor, songIdFor } from './routes'
+
+describe('documentTitle', () => {
+  it('names the screen and the app for each screen', () => {
+    expect(documentTitle('library')).toBe('Your songs · PianoLearner')
+    expect(documentTitle('sound')).toBe('Sound · PianoLearner')
+    expect(documentTitle('latency')).toBe('Delay test · PianoLearner')
+    expect(documentTitle('play')).toBe('Play · PianoLearner')
+    expect(documentTitle('not-found')).toBe('Screen not found · PianoLearner')
+  })
+})
 
 describe('screenFor', () => {
   it('shows the library for an empty hash, a lone # and #/', () => {

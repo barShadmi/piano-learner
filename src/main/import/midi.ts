@@ -13,7 +13,7 @@ const MAX_MEASURES = 20000
 const KEY_NAMES = ['Cb', 'Gb', 'Db', 'Ab', 'Eb', 'Bb', 'F', 'C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#']
 
 const NOT_MIDI = 'This file could not be read as MIDI.'
-const NO_NOTES = 'This file has no notes.'
+const NO_NOTES = 'This file has no notes. Pick another file.'
 
 function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path

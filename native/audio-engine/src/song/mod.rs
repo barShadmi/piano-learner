@@ -4,8 +4,9 @@
 //! ring with the player's own keys and is never counted in the latency report.
 //! Nothing here runs on the audio thread.
 //!
-//! Timing: the thread sleeps until about 3 ms before an event, then spins, so
+//! Timing: the thread sleeps until a short time before an event, then spins, so
 //! an event leaves within a few microseconds of its time on an idle machine.
+//! How short depends on the clock: 0.5 ms when its sleeps are precise, 3 ms otherwise.
 //! The clock is a trait so tests can run a whole song in virtual time.
 
 use crate::core::Command;
@@ -22,8 +23,11 @@ mod win;
 pub const MAX_EVENTS: usize = 200_000;
 /// The longest time a song may name (one day, in ms). Keeps every sum far from overflow.
 pub const MAX_TIME_MS: f64 = 86_400_000.0;
-/// How long before an event the thread stops sleeping and starts spinning.
+/// How long before an event the thread stops sleeping and starts spinning, when sleeps are coarse.
 const SPIN_US: u64 = 3_000;
+/// The same, when the clock's sleeps are precise (a high-resolution timer). Only Windows has one.
+#[cfg(windows)]
+const PRECISE_SPIN_US: u64 = 500;
 /// How long to wait before trying again after the ring refused a command.
 const RETRY_US: u64 = 200;
 /// How many times a release is tried before giving up (about 20 ms).
@@ -60,6 +64,10 @@ pub trait Clock: Send + Sync + 'static {
     fn sleep_us(&self, us: u64);
     /// One turn of a busy wait.
     fn spin(&self);
+    /// How long before an event the song thread stops sleeping and spins.
+    fn spin_us(&self) -> u64 {
+        SPIN_US
+    }
     /// Called on the song thread when it starts (priority, timer resolution).
     fn thread_begin(&self) {}
     /// Called on the song thread when it ends, even after a panic.
@@ -108,6 +116,14 @@ impl Clock for RealClock {
 
     fn spin(&self) {
         std::hint::spin_loop();
+    }
+
+    fn spin_us(&self) -> u64 {
+        #[cfg(windows)]
+        if self.win.has_high_res_timer() {
+            return PRECISE_SPIN_US;
+        }
+        SPIN_US
     }
 
     fn thread_begin(&self) {
@@ -185,6 +201,7 @@ pub fn run_song(
     let mut guard = ReleaseOnDrop { clock, sink, held: [0u8; 128] };
     let held = &mut guard.held;
     let mut next = events.partition_point(|e| e.time_ms < from_ms);
+    let spin_us = clock.spin_us();
     while next < events.len() {
         if cancel.load(Ordering::Acquire) {
             break;
@@ -194,8 +211,8 @@ pub fn run_song(
         let now = clock.now_us();
         if now < due {
             let wait = due - now;
-            if wait > SPIN_US {
-                clock.sleep_us(wait - SPIN_US);
+            if wait > spin_us {
+                clock.sleep_us(wait - spin_us);
             } else {
                 clock.spin();
             }

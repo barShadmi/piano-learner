@@ -3,5 +3,6 @@
 export const screens: { name: string; hash: string }[] = [
   { name: 'library', hash: '' },
   { name: 'sound', hash: 'sound' },
-  { name: 'latency', hash: 'latency' }
+  { name: 'latency', hash: 'latency' },
+  { name: 'play', hash: 'play' }
 ]

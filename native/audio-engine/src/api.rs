@@ -212,18 +212,6 @@ pub fn status() -> JsStatus {
     }
 }
 
-#[napi(object, js_name = "LatencySample")]
-pub struct JsLatencySample {
-    /// MIDI note number of the key.
-    pub note: u8,
-    /// MIDI message arrived to the audio callback that picked it up, in ms.
-    pub wait_ms: f64,
-    /// Audio callback to sound leaving the device, in ms (from the output latency).
-    pub output_ms: f64,
-    /// `waitMs + outputMs` plus 1.0 ms for USB MIDI (an estimate), in ms.
-    pub total_ms: f64,
-}
-
 #[napi(object, js_name = "LatencySummary")]
 pub struct JsLatencySummary {
     /// How many key timings are remembered (at most 200).
@@ -240,16 +228,6 @@ pub struct JsLatencySummary {
     /// "wasapi-exclusive", "wasapi-shared", "asio" or "cpal" ("" = no output).
     pub backend: String,
     pub underruns: f64,
-}
-
-/// Key timings since the last call, oldest first. Each key is returned once.
-#[napi]
-pub fn latency_samples() -> Vec<JsLatencySample> {
-    ENGINE
-        .latency_samples()
-        .into_iter()
-        .map(|r| JsLatencySample { note: r.note, wait_ms: r.wait_ms, output_ms: r.output_ms, total_ms: r.total_ms })
-        .collect()
 }
 
 /// Median, 95th percentile and slowest of the last 200 keys (total time), and

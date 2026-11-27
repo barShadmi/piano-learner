@@ -34,7 +34,7 @@ describe('runImportInWorker', () => {
   it('gives the timeout message when the worker takes too long', async () => {
     const file = workerFile(`setInterval(() => {}, 1000)`)
     const result = await runImportInWorker('/music/a.mid', { workerFile: file, timeoutMs: 100 })
-    expect(result).toEqual({ ok: false, error: 'Importing took too long.' })
+    expect(result).toEqual({ ok: false, error: 'Importing took too long. Try a smaller file.' })
   })
 
   it('gives a plain error when the worker crashes', async () => {

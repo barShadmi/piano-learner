@@ -3,12 +3,12 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding: var(--space-6);
+  padding: var(--space-4) var(--space-6);
 }
 
 @media (min-width: 1600px) {
   .screen {
-    padding: var(--space-7);
+    padding: var(--space-5) var(--space-7);
   }
 }
 
@@ -19,30 +19,56 @@
   gap: var(--space-4);
 }
 
+/* One line with an ellipsis: two lines would leave under 240 px for the falling notes at 1024x640. */
 .title {
   font-size: var(--text-2xl);
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.back {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .statusLine {
   font-size: var(--text-lg);
   color: var(--text);
-  margin: var(--space-5) 0 0;
+  margin: var(--space-3) 0 0;
 }
 
+/* Piano and pedal on the left, the hint on the right. They wrap under each other when narrow. */
+.infoLine {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 var(--space-4);
+  margin-top: var(--space-1);
+}
+
+.compact {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.sep {
+  margin: 0 var(--space-2);
+}
+
+/* Buttons, then the status line in the space that is left. */
 .songStrip {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-}
-
-.songTitle {
-  flex: 1 1 auto;
-  margin: 0;
-  font-size: var(--text-lg);
-  color: var(--text);
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-1);
 }
 
 /* The notes area and the keyboard share one width-limited column, so every note lines up with its key.
@@ -52,8 +78,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
+  gap: var(--space-1);
+  margin-top: var(--space-1);
 }
 
 .stage {
@@ -66,12 +92,11 @@
 }
 
 .legend {
-  margin: 0 0 var(--space-2);
+  margin: 0 0 var(--space-1);
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
-.pedal,
 .keysDown {
   font-size: var(--text-md);
   color: var(--text-muted);
@@ -82,17 +107,32 @@
   margin-right: var(--space-2);
 }
 
-/* The reason Listen could not play the song, with a way to the Sound screen. */
+/* The hint sits after the buttons and may wrap inside its own cell. */
+.hint {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* The status line, with a way to the Sound screen when the engine gave a reason.
+   It has a row of its own with a minimum height of 44 px, so the words have room and the area below stays put. */
 .soundLine {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
-  margin-top: var(--space-3);
+  min-height: 44px;
+  margin-top: var(--space-1);
 }
 
 .soundReason {
   margin: 0;
   font-size: var(--text-md);
   color: var(--text);
+}
+
+/* The Open Sound link keeps its size next to a long message. */
+.soundLine > a {
+  flex-shrink: 0;
 }

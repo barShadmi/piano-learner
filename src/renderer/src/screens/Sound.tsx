@@ -9,6 +9,7 @@ import {
   LOCAL_CONTROL_TIP,
   localControlLine,
   PIANO_SOUND_CREDIT,
+  pianoHelp,
   pianoLine,
   pianoProblem,
   pianoSoundLine,
@@ -149,6 +150,7 @@ export default function Sound() {
   const pianoGlyph = piano === undefined ? '…' : connected ? '✓' : '○'
   const problem = pianoProblem(piano)
   const localLine = localControlLine(piano)
+  const help = pianoHelp(piano)
 
   return (
     <main className={styles.screen}>
@@ -223,6 +225,7 @@ export default function Sound() {
         <p className={styles.statusLine} role="status">
           {pianoLine(piano)}
         </p>
+        {help ? <p className={styles.note}>{help}</p> : null}
         {localLine ? (
           <>
             <p className={styles.note}>{localLine}</p>
@@ -278,7 +281,7 @@ export default function Sound() {
         </button>
         {canPlay ? null : (
           <p className={styles.note} id="test-hint">
-            Sound has to be on before you can play a test sound.
+            Turn sound on first. Use Try again or Start sound above.
           </p>
         )}
         <p className={styles.note} role="status">
