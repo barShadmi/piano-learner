@@ -82,13 +82,24 @@
   margin-right: var(--space-2);
 }
 
-/* The reason Listen could not play the song, with a way to the Sound screen. */
+.hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* One slot with a fixed height, so the falling area never jumps when the words change. */
+.messages {
+  margin-top: var(--space-3);
+}
+
+/* The status line, with a way to the Sound screen when the engine gave a reason. */
 .soundLine {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
-  margin-top: var(--space-3);
+  min-height: 44px;
 }
 
 .soundReason {

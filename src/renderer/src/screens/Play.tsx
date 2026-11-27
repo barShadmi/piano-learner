@@ -11,6 +11,7 @@ import { mergeLit } from '../keyboard/lit'
 import { applyEvents, keysDownLine, type KeysState } from '../keyboard/keysDown'
 import Keyboard from '../keyboard/Keyboard'
 import styles from './Play.module.css'
+import { engineStart, leadInEnd, playView, type Activity } from './playState'
 import { pianoLine } from './soundText'
 
 // Nothing is down and the pedal is up. One object, so setting it again changes nothing.
@@ -76,6 +77,15 @@ export default function Play({ songId }: { songId?: string }) {
   )
 }
 
+// A dot before the word of the button that is on. The pressed state is also in aria-pressed.
+function Dot({ on }: { on: boolean }) {
+  return on ? (
+    <span aria-hidden="true" className={styles.glyph}>
+      ●
+    </span>
+  ) : null
+}
+
 // One song on the Play screen: the piano status, the song controls, the falling notes and the keyboard.
 // It is keyed by song id, so each song starts with its own clock.
 function PlaySong({ song }: { song: Song }) {
@@ -95,10 +105,11 @@ function PlaySong({ song }: { song: Song }) {
     return c
   })
 
-  // Listen mode. `listening` is true while the engine is meant to be playing the song.
+  // What the song is doing. `listening` is true while the engine is meant to be playing the song.
   // `session` changes whenever Listen starts or stops, so a late answer from an older press is ignored.
   // `leadInTimer` starts the engine song when the lead-in (before time 0) ends.
-  const [listening, setListening] = useState(false)
+  const [activity, setActivity] = useState<Activity>('idle')
+  const listening = activity === 'listen'
   // Plain reason when the engine could not play the song. The notes keep falling.
   const [heard, setHeard] = useState<string | undefined>(undefined)
   const session = useRef(0)
@@ -109,7 +120,6 @@ function PlaySong({ song }: { song: Song }) {
     session.current++
     clearTimeout(leadInTimer.current)
     leadInTimer.current = undefined
-    setListening(false)
     setHeard(undefined)
     window.pianoLearner.song.stop().then(
       () => undefined,
@@ -123,11 +133,13 @@ function PlaySong({ song }: { song: Song }) {
   }, [stopListening])
 
   const listen = useCallback(() => {
+    // Already listening: nothing to do.
+    if (activity === 'listen') return
     const mine = ++session.current
     clearTimeout(leadInTimer.current)
     leadInTimer.current = undefined
     setHeard(undefined)
-    setListening(true)
+    setActivity('listen')
 
     let fromS = clock.nowSeconds()
     if (fromS >= endS) {
@@ -141,7 +153,7 @@ function PlaySong({ song }: { song: Song }) {
       if (reply.ok) {
         setHeard(undefined)
       } else {
-        setListening(false)
+        setActivity('watch')
         setHeard(reply.error)
       }
       clock.play(1)
@@ -152,41 +164,48 @@ function PlaySong({ song }: { song: Song }) {
       )
     }
 
-    if (fromS < 0) {
+    const begin = engineStart(fromS)
+    if (begin.kind === 'wait') {
       // In the lead-in the clock starts now, and the engine starts when the clock reaches 0.
       clock.play(1)
-      leadInTimer.current = setTimeout(
-        () => {
-          leadInTimer.current = undefined
-          if (mine !== session.current) return
-          send(Math.max(0, clock.nowSeconds() * 1000))
-        },
-        -fromS * 1000
-      )
+      leadInTimer.current = setTimeout(() => {
+        leadInTimer.current = undefined
+        if (mine !== session.current) return
+        const first = leadInEnd()
+        clock.seek(first.seekS)
+        send(first.fromMs)
+      }, begin.waitMs)
     } else {
-      send(fromS * 1000)
+      send(begin.fromMs)
     }
-  }, [clock, endS, startS, songEvents])
+  }, [activity, clock, endS, startS, songEvents])
 
-  const start = useCallback(() => {
-    // Watch only: Start always silences a Listen that is on or waiting to begin.
+  const watch = useCallback(() => {
+    if (activity === 'watch' && heard === undefined) return
+    // Watch only: this always silences a Listen that is on or waiting to begin. The notes keep moving.
     stopListening()
+    setActivity('watch')
     // After the end, Start begins again from the lead-in.
     if (clock.nowSeconds() >= endS) clock.seek(startS)
     clock.play(1)
-  }, [clock, startS, endS, stopListening])
+  }, [activity, heard, clock, startS, endS, stopListening])
+  const view = playView({ activity, reason: heard })
   const pause = useCallback(() => {
+    if (view.pauseDisabled) return
     clock.pause()
     stopListening()
-  }, [clock, stopListening])
+    setActivity('paused')
+  }, [view.pauseDisabled, clock, stopListening])
   const backToStart = useCallback(() => {
     clock.pause()
     stopListening()
     clock.seek(startS)
+    setActivity('idle')
   }, [clock, startS, stopListening])
   const onEnd = useCallback(() => {
     clock.pause()
     stopListening()
+    setActivity('finished')
   }, [clock, stopListening])
 
   // While Listen plays, check the engine's position every second and move the clock if it drifted.
@@ -242,40 +261,53 @@ function PlaySong({ song }: { song: Song }) {
 
       <div className={styles.songStrip}>
         <p className={styles.songTitle}>Song: {song.title}</p>
-        <button type="button" className="button" onClick={start}>
-          Start
-        </button>
-        <button type="button" className="button" onClick={listen}>
+        <button
+          type="button"
+          className="button"
+          aria-pressed={view.listenPressed}
+          onClick={listen}
+        >
+          <Dot on={view.listenPressed} />
           Listen
         </button>
-        <button type="button" className="button" onClick={pause}>
+        <button
+          type="button"
+          className="button button-secondary"
+          aria-pressed={view.watchPressed}
+          onClick={watch}
+        >
+          <Dot on={view.watchPressed} />
+          Watch (no sound)
+        </button>
+        <button
+          type="button"
+          className="button button-secondary"
+          aria-disabled={view.pauseDisabled}
+          onClick={pause}
+        >
           Pause
         </button>
-        <button type="button" className="button" onClick={backToStart}>
-          Back to the start
+        <button type="button" className="button button-secondary" onClick={backToStart}>
+          Restart song
         </button>
       </div>
+      <p className={styles.hint}>Listen plays the song with sound. Watch shows the notes only.</p>
 
-      {listening && heard === undefined ? (
-        <p className={styles.soundReason} role="status">
-          Listening…
-        </p>
-      ) : null}
-      {heard !== undefined ? (
+      <div className={styles.messages}>
         <div className={styles.soundLine}>
           <p className={styles.soundReason} role="status">
-            {heard}
+            {view.status}
           </p>
-          <a href="#/sound" className="button">
-            Open Sound settings
-          </a>
+          {view.soundLink ? (
+            <a href="#/sound" className="button button-secondary">
+              Open Sound settings
+            </a>
+          ) : null}
         </div>
-      ) : null}
-      {plan.cut ? (
-        <p className={styles.soundReason} role="status">
-          This song is too long to play to the end.
-        </p>
-      ) : null}
+        {plan.cut ? (
+          <p className={styles.soundReason}>Listen plays only the first part of this long song.</p>
+        ) : null}
+      </div>
 
       <div className={styles.bottom}>
         <p className={styles.pedal}>

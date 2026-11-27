@@ -209,7 +209,7 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
     }))
     expect(widths.canvas).toBe(widths.keyboard)
 
-    await window.getByRole('button', { name: 'Start', exact: true }).click()
+    await window.getByRole('button', { name: 'Watch (no sound)' }).click()
     const before = await frames()
     // At least 30 frames a second: 45 new frames within 1.5 s of drawing, polled because
     // the count is only written twice a second.
@@ -235,8 +235,8 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
     expect(await lit()).toBe(pausedLit)
     expect(await frames()).toBe(pausedFrames)
 
-    // Back to the start: nothing is lit (the song begins 2 s before its first note).
-    await window.getByRole('button', { name: 'Back to the start' }).click()
+    // Restart song: nothing is lit (the song begins 2 s before its first note).
+    await window.getByRole('button', { name: 'Restart song' }).click()
     await expect.poll(lit).toBe('')
 
     // Screenshots 4 s into the song, in both themes.
@@ -245,8 +245,8 @@ test('the falling notes run, pause, reset, and look right in light and dark', as
       await window.evaluate((t) => {
         document.documentElement.dataset.theme = t
       }, theme)
-      await window.getByRole('button', { name: 'Back to the start' }).click()
-      await window.getByRole('button', { name: 'Start', exact: true }).click()
+      await window.getByRole('button', { name: 'Restart song' }).click()
+      await window.getByRole('button', { name: 'Watch (no sound)' }).click()
       await window.waitForTimeout(4000)
       await expect.poll(async () => (await lit()) !== '').toBe(true)
       if (shots) await window.screenshot({ path: path.join(shots, `falling-${theme}.png`) })
@@ -271,12 +271,19 @@ test('Listen asks for the song to be heard; with no sound it says why and the fa
       Number(await window.locator('[data-frames]').getAttribute('data-frames'))
     await expect.poll(frames, { timeout: 15_000 }).toBeGreaterThan(0)
 
+    // Before any press: nothing is playing, so Pause is off and nothing is pressed.
+    await expect(window.getByRole('button', { name: 'Pause' })).toHaveAttribute('aria-disabled', 'true')
+    await expect(window.getByRole('button', { name: 'Listen', exact: true })).toHaveAttribute('aria-pressed', 'false')
+
     // This container has no sound card, so the engine is not on and the song cannot be heard.
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
     await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
       timeout: 10_000
     })
     await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveAttribute('href', '#/sound')
+    // The song runs without sound: Watch shows as the mode that is on and Pause works.
+    await expect(window.getByRole('button', { name: 'Watch (no sound)' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(window.getByRole('button', { name: 'Pause' })).toHaveAttribute('aria-disabled', 'false')
 
     // The notes keep falling without sound.
     const before = await frames()
@@ -291,7 +298,7 @@ test('Listen asks for the song to be heard; with no sound it says why and the fa
 })
 
 // The sample starts 2 s before its first note, so Listen begins in the lead-in: the engine start waits 2 s.
-test('Start during Listen silences it: a waiting start is cancelled and no sound message appears', async () => {
+test('Watch during Listen silences it: a waiting start is cancelled and no sound message appears', async () => {
   test.setTimeout(60_000)
   const app = await launch()
   try {
@@ -301,11 +308,11 @@ test('Start during Listen silences it: a waiting start is cancelled and no sound
     await expect(window.getByText('Song: Canon in D (opening)')).toBeVisible()
 
     await window.getByRole('button', { name: 'Listen', exact: true }).click()
-    await expect(window.getByRole('status').filter({ hasText: 'Listening…' })).toBeVisible()
-    await window.getByRole('button', { name: 'Start', exact: true }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Playing with sound.' })).toBeVisible()
+    await window.getByRole('button', { name: 'Watch (no sound)' }).click()
 
     // Waiting past the lead-in: the cancelled start never reaches the engine, so nothing is reported.
-    await expect(window.getByRole('status').filter({ hasText: 'Listening…' })).toHaveCount(0)
+    await expect(window.getByRole('status').filter({ hasText: 'Playing with sound.' })).toHaveCount(0)
     await window.waitForTimeout(3000)
     await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
     await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveCount(0)
@@ -314,7 +321,7 @@ test('Start during Listen silences it: a waiting start is cancelled and no sound
   }
 })
 
-test('Start clears the sound message that Listen showed', async () => {
+test('Watch clears the sound message that Listen showed', async () => {
   test.setTimeout(60_000)
   const app = await launch()
   try {
@@ -327,7 +334,7 @@ test('Start clears the sound message that Listen showed', async () => {
     await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toBeVisible({
       timeout: 10_000
     })
-    await window.getByRole('button', { name: 'Start', exact: true }).click()
+    await window.getByRole('button', { name: 'Watch (no sound)' }).click()
     await expect(window.getByRole('status').filter({ hasText: 'Sound is not on yet.' })).toHaveCount(0)
     await expect(window.getByRole('link', { name: 'Open Sound settings' })).toHaveCount(0)
   } finally {
