@@ -1,0 +1,83 @@
+//! Platform-free engine core: commands in, interleaved samples out.
+
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
+
+pub use command::Command;
+pub use mixer::Mixer;
+
+/// Status shared with the control side. Written with atomics only.
+#[derive(Default)]
+pub struct EngineStats {
+    pub callbacks: AtomicU64,
+    pub last_buffer_frames: AtomicU32,
+    pub underruns: AtomicU64,
+    pub running: AtomicBool,
+}
+
+/// Lock-free command channel (single producer, single consumer).
+pub fn channel(capacity: usize) -> (rtrb::Producer<Command>, rtrb::Consumer<Command>) {
+    rtrb::RingBuffer::new(capacity)
+}
+
+/// Owned by the render thread: drains commands, then renders.
+pub struct EngineCore {
+    commands: rtrb::Consumer<Command>,
+    mixer: Mixer,
+}
+
+impl EngineCore {
+    pub fn new(commands: rtrb::Consumer<Command>, mixer: Mixer) -> Self {
+        Self { commands, mixer }
+    }
+
+    pub fn process(&mut self, out: &mut [f32]) {
+        while let Ok(cmd) = self.commands.pop() {
+            self.mixer.handle(cmd);
+        }
+        self.mixer.render(out);
+    }
+}
+
+mod command;
+mod mixer;
+mod tone;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_applies_pending_commands_then_renders() {
+        let (mut tx, rx) = channel(16);
+        let mut core = EngineCore::new(rx, Mixer::new(48_000, 2));
+        tx.push(Command::PlayTestTone { frequency_hz: 440.0, seconds: 1.0, gain: 0.25 }).unwrap();
+        let mut out = [0.0f32; 2 * 480];
+        core.process(&mut out);
+        assert!(out.iter().any(|s| s.abs() > 0.01), "tone should be audible");
+    }
+
+    #[test]
+    fn process_with_no_commands_is_silent() {
+        let (_tx, rx) = channel(16);
+        let mut core = EngineCore::new(rx, Mixer::new(48_000, 2));
+        let mut out = [1.0f32; 2 * 64];
+        core.process(&mut out);
+        assert!(out.iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn channel_has_requested_capacity() {
+        let (tx, _rx) = channel(4);
+        assert_eq!(tx.buffer().capacity(), 4);
+    }
+
+    #[test]
+    fn stats_start_at_zero_and_not_running() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let s = EngineStats::default();
+        assert_eq!(s.callbacks.load(Relaxed), 0);
+        assert_eq!(s.last_buffer_frames.load(Relaxed), 0);
+        assert_eq!(s.underruns.load(Relaxed), 0);
+        assert!(!s.running.load(Relaxed));
+    }
+}
