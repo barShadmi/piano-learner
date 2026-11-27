@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { MidiEvent, StartConfig, ToneArgs } from '../shared/audio'
 import type { SoundSettings } from '../shared/settings'
+import type { SongGetReply, SongImportReply, SongSummary } from '../shared/songs'
 
 // The main process passes a forced theme as a command-line argument.
 const themeArg = process.argv.find((arg) => arg.startsWith('--piano-theme='))
@@ -46,13 +47,21 @@ const latency = {
   showFile: () => ipcRenderer.invoke('latency:open-folder')
 }
 
-// forcedTheme is added only when it is set, so a normal launch exposes just version, audio, latency, midi and settings.
+// The song library. The screens only ask for the list, one song by id, or an import (the file dialog is in the main process).
+const songs = {
+  list: (): Promise<SongSummary[]> => ipcRenderer.invoke('songs:list'),
+  get: (id: string): Promise<SongGetReply> => ipcRenderer.invoke('songs:get', id),
+  import: (): Promise<SongImportReply> => ipcRenderer.invoke('songs:import')
+}
+
+// forcedTheme is added only when it is set, so a normal launch exposes just version, audio, latency, midi, settings and songs.
 const api = {
   version: '0.0.1',
   audio,
   latency,
   midi,
   settings,
+  songs,
   ...(forcedTheme ? { forcedTheme } : {})
 }
 

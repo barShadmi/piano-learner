@@ -1,10 +1,11 @@
-import { app, BrowserWindow, Menu, session } from 'electron'
+import { app, BrowserWindow, dialog, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { isAppUrl } from './appUrl'
 import { loadEngine, pianoFolder } from './audio'
 import { createAudioController } from './audioController'
-import { registerAudioIpc, registerSettingsIpc, sendMidiEvents } from './ipc'
+import { registerAudioIpc, registerSettingsIpc, registerSongsIpc, sendMidiEvents } from './ipc'
+import { runImportInWorker } from './import/runInWorker'
 import { loadSettings } from './settingsStore'
 
 // These three are for development and the screenshot script only.
@@ -24,10 +25,32 @@ const rendererFileUrl = pathToFileURL(rendererFile).href
 
 const appUrlConfig = { rendererUrl, rendererFileUrl }
 
+// The file types the import dialog offers. The importer checks the extension again.
+const SONG_FILE_EXTENSIONS = ['mid', 'midi', 'musicxml', 'xml', 'mxl']
+
+// Used by the import tests only: a file to import instead of showing the dialog.
+// A packaged app ignores it, so the dialog is always shown there.
+const e2eImportFile =
+  !app.isPackaged && process.env['PIANO_LEARNER_E2E'] === '1' ? process.env['PIANO_LEARNER_E2E_IMPORT'] : undefined
+
 let mainWindow: BrowserWindow | null = null
 
 // Loading can fail (no engine file). The controller then reports it and the app still opens.
 const audio = createAudioController(loadEngine())
+
+// Shows the "Import file" dialog. Resolves to the chosen path, or undefined when Bar cancels.
+async function chooseSongFile(): Promise<string | undefined> {
+  if (e2eImportFile) return e2eImportFile
+  const options = {
+    title: 'Import file',
+    properties: ['openFile' as const],
+    filters: [{ name: 'Music files', extensions: SONG_FILE_EXTENSIONS }]
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  return result.canceled ? undefined : result.filePaths[0]
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -147,6 +170,12 @@ if (!app.requestSingleInstanceLock()) {
       const settings = loadSettings(settingsFolder)
       const currentSettings = registerSettingsIpc(audio, settingsFolder, settings)
       registerAudioIpc(audio, currentSettings)
+      // The song library. Each import runs in a worker thread (built next to this file).
+      registerSongsIpc({
+        folder: join(settingsFolder, 'songs'),
+        chooseFile: chooseSongFile,
+        importFile: (path) => runImportInWorker(path, { workerFile: join(__dirname, 'importWorker.js') })
+      })
       createWindow()
       // Open the sound output after the window exists, so it never delays the window.
       // The result (or the reason it failed) is kept for the Sound screen. The saved volume

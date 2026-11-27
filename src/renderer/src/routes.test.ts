@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screenFor } from './routes'
+import { screenFor, songIdFor } from './routes'
 
 describe('screenFor', () => {
   it('shows the library for an empty hash, a lone # and #/', () => {
@@ -43,5 +43,25 @@ describe('screenFor play', () => {
   it('does not match look-alikes', () => {
     expect(screenFor('#/plays')).toBe('not-found')
     expect(screenFor('#/play/x')).toBe('not-found')
+  })
+})
+
+describe('screenFor play with a song', () => {
+  const id = '6f1c2a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6'
+
+  it('shows the play screen for #/play/<song id>', () => {
+    expect(screenFor(`#/play/${id}`)).toBe('play')
+  })
+
+  it('gives the song id from the route, and none for plain #/play', () => {
+    expect(songIdFor(`#/play/${id}`)).toBe(id)
+    expect(songIdFor('#/play')).toBeUndefined()
+    expect(songIdFor('#/sound')).toBeUndefined()
+  })
+
+  it('does not take an id that is not a UUID', () => {
+    expect(screenFor('#/play/x')).toBe('not-found')
+    expect(screenFor('#/play/../secret')).toBe('not-found')
+    expect(songIdFor('#/play/x')).toBeUndefined()
   })
 })

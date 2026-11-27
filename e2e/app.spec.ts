@@ -1,13 +1,18 @@
 import { _electron as electron, expect, test } from '@playwright/test'
+import { Midi } from '@tonejs/midi'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
 // Each launch gets its own profile folder so parallel or repeated runs never share state.
 // A test that must keep state across two launches passes the same folder to both, and removes it itself.
-function launch(sharedUserData?: string): ReturnType<typeof electron.launch> {
+// `extraEnv` adds variables for the app (used only by the import tests, which skip the file dialog).
+function launch(sharedUserData?: string, extraEnv?: Record<string, string>): ReturnType<typeof electron.launch> {
   const userData = sharedUserData ?? fs.mkdtempSync(path.join(os.tmpdir(), 'pl-'))
-  const launched = electron.launch({ args: ['.', '--no-sandbox', `--user-data-dir=${userData}`] })
+  const launched = electron.launch({
+    args: ['.', '--no-sandbox', `--user-data-dir=${userData}`],
+    env: { ...(process.env as Record<string, string>), ...extraEnv }
+  })
   if (sharedUserData !== undefined) return launched
   // Remove the profile folder once the app has closed (or failed to start).
   const cleanup = (): void => fs.rmSync(userData, { recursive: true, force: true })
@@ -28,7 +33,7 @@ test('the app opens to the Your songs screen', async () => {
   }
 })
 
-test('the Import file button is off and reachable by keyboard', async () => {
+test('the Import file button is on and reachable by keyboard', async () => {
   const app = await launch()
   try {
     const window = await app.firstWindow()
@@ -36,7 +41,7 @@ test('the Import file button is off and reachable by keyboard', async () => {
 
     const importButton = window.getByRole('button', { name: 'Import file' })
     await expect(importButton).toBeVisible()
-    await expect(importButton).toHaveAttribute('aria-disabled', 'true')
+    await expect(importButton).not.toHaveAttribute('aria-disabled', 'true')
 
     await expect(window.getByRole('button', { name: 'Import file' })).toBeVisible()
     await expect.poll(() => window.evaluate(() => document.hasFocus())).toBe(true)
@@ -70,7 +75,7 @@ test('the window is locked down: no Node, no new windows, only the safe bridge',
     expect(result.process).toBe('undefined')
     expect(result.opened).toBeNull()
     expect(result.midi).toBe('denied')
-    expect(result.bridge).toEqual(['audio', 'latency', 'midi', 'settings', 'version'])
+    expect(result.bridge).toEqual(['audio', 'latency', 'midi', 'settings', 'songs', 'version'])
 
     await page.evaluate(() => {
       location.href = 'https://example.com'
@@ -363,5 +368,91 @@ test('the sound settings are labelled, save at once, and are kept after a restar
     }
   } finally {
     fs.rmSync(userData, { recursive: true, force: true })
+  }
+})
+
+// A small two-track MIDI file for the import test. The title comes from the track name.
+function writeMidiFixture(dir: string): string {
+  const midi = new Midi()
+  const track = midi.addTrack()
+  track.name = 'E2E Tune'
+  for (let i = 0; i < 4; i++) {
+    track.addNote({ midi: 60 + i * 2, time: i, duration: 0.9 })
+  }
+  const file = path.join(dir, 'e2e-tune.mid')
+  fs.writeFileSync(file, Buffer.from(midi.toArray()))
+  return file
+}
+
+test('Import file adds a MIDI song to the library, and it opens on Play', async () => {
+  const fixtures = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-fixture-'))
+  const midiFile = writeMidiFixture(fixtures)
+  const app = await launch(undefined, { PIANO_LEARNER_E2E: '1', PIANO_LEARNER_E2E_IMPORT: midiFile })
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+
+    await window.getByRole('button', { name: 'Import file' }).click()
+    await expect(window.getByRole('status').filter({ hasText: 'Added “E2E Tune”.' })).toBeVisible({
+      timeout: 20_000
+    })
+
+    // The sample is always first, and the new song is in the list with a Play link.
+    const row = window.getByRole('listitem').filter({ hasText: 'E2E Tune' })
+    await expect(row).toBeVisible()
+    await expect(window.getByRole('link', { name: 'Play E2E Tune', exact: true })).toBeVisible()
+    await expect(window.getByRole('link', { name: 'Play Canon in D (opening)', exact: true })).toBeVisible()
+    await expect(window.getByRole('listitem').first()).toContainText('Canon in D (opening) · sample')
+
+    // Screenshots of the library with the sample and one imported song, in both themes.
+    const shots = process.env['LIBRARY_SHOTS']
+    for (const theme of ['light', 'dark'] as const) {
+      await window.evaluate((t) => {
+        document.documentElement.dataset.theme = t
+      }, theme)
+      if (shots) await window.screenshot({ path: path.join(shots, `library-${theme}.png`) })
+    }
+
+    await row.getByRole('link', { name: 'Play E2E Tune', exact: true }).click()
+    await expect(window.getByText('Song: E2E Tune')).toBeVisible()
+  } finally {
+    await app.close()
+    fs.rmSync(fixtures, { recursive: true, force: true })
+  }
+})
+
+test('a file that cannot be imported says why in the library', async () => {
+  const fixtures = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-fixture-'))
+  const pdf = path.join(fixtures, 'score.pdf')
+  fs.writeFileSync(pdf, '%PDF-1.4 not a song')
+  const app = await launch(undefined, { PIANO_LEARNER_E2E: '1', PIANO_LEARNER_E2E_IMPORT: pdf })
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+
+    await window.getByRole('button', { name: 'Import file' }).click()
+    await expect(
+      window.getByRole('status').filter({ hasText: 'This kind of file cannot be imported yet.' })
+    ).toBeVisible({ timeout: 20_000 })
+    await expect(window.getByRole('listitem')).toHaveCount(1)
+  } finally {
+    await app.close()
+    fs.rmSync(fixtures, { recursive: true, force: true })
+  }
+})
+
+test('a song that is not in the library says so on Play, with a way back', async () => {
+  const app = await launch()
+  try {
+    const window = await app.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+    await window.evaluate(() => {
+      location.hash = '#/play/6f1c2a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6'
+    })
+    await expect(window.getByText('This song could not be found.')).toBeVisible()
+    await window.getByRole('link', { name: 'Back to your songs' }).click()
+    await expect(window.getByRole('heading', { name: 'Your songs' })).toBeVisible()
+  } finally {
+    await app.close()
   }
 })

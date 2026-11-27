@@ -12,6 +12,7 @@ import type {
 } from '../shared/audio'
 import type { LatencyClearReply, LatencyOpenReply, LatencyReply, LatencySaveReply } from '../shared/latency'
 import type { SettingsSetReply, SoundSettings } from '../shared/settings'
+import type { SongGetReply, SongImportReply, SongSummary } from '../shared/songs'
 
 export {}
 
@@ -37,6 +38,11 @@ declare global {
       settings: {
         get(): Promise<SoundSettings>
         set(next: SoundSettings): Promise<SettingsSetReply>
+      }
+      songs: {
+        list(): Promise<SongSummary[]>
+        get(id: string): Promise<SongGetReply>
+        import(): Promise<SongImportReply>
       }
       midi: {
         status(): Promise<MidiStatusReply>

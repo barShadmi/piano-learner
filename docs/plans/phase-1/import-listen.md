@@ -33,3 +33,4 @@ Acceptance: npm test, lint, typecheck, build, e2e pass.
 | Step | Built by | Tries | Verifier |
 | --- | --- | --- | --- |
 | 1 | builder-plus (Sonnet) | 2 | FAIL (a pickup bar left a silent gap), then PASS. Later: use implicit="yes" before the length check for pickups; tempos inside a pickup bar are not shifted. |
+| 2 | builder (Haiku) | 2 | FAIL (identical "Play" link names; a notation program named in a test comment), then PASS. Imports run in a worker thread; Bar should try one import in the Windows installer. |

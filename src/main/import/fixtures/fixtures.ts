@@ -112,7 +112,7 @@ export const TWO_STAFF_XML = `<?xml version="1.0" encoding="UTF-8"?>
 </score-partwise>
 `
 
-/** The same score, zipped the way MuseScore writes an .mxl. */
+/** The same score, zipped the way notation programs write an .mxl. */
 export function twoStaffMxl(): Uint8Array {
   return zipSync({
     'META-INF/container.xml': strToU8(

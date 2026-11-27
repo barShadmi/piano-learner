@@ -4,7 +4,7 @@ import Library from './screens/Library'
 import NotFound from './screens/NotFound'
 import Play from './screens/Play'
 import Sound from './screens/Sound'
-import { screenFor } from './routes'
+import { screenFor, songIdFor } from './routes'
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash)
@@ -19,6 +19,6 @@ export default function App() {
   if (screen === 'library') return <Library />
   if (screen === 'sound') return <Sound />
   if (screen === 'latency') return <Latency />
-  if (screen === 'play') return <Play />
+  if (screen === 'play') return <Play key={songIdFor(hash) ?? 'sample'} songId={songIdFor(hash)} />
   return <NotFound />
 }
