@@ -179,7 +179,11 @@ fn try_exclusive(device: &wasapi::Device, kind: SampleKind, rate: u32, frames: u
             // The device wants a different size: it tells us which, after the
             // failed call. A client can only be initialised once, so make a
             // fresh one with the aligned size.
-            let retry = client.get_buffer_size().and_then(|aligned| {
+            // Release the first client before opening the next, as Microsoft's
+            // example does: some USB drivers refuse two clients at once.
+            let aligned = client.get_buffer_size();
+            drop(client);
+            let retry = aligned.and_then(|aligned| {
                 let mut again = device.get_iaudioclient()?;
                 let period = calculate_period_100ns(i64::from(aligned), i64::from(rate));
                 let mode = StreamMode::EventsExclusive { period_hns: period };
