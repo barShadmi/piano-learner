@@ -13,7 +13,10 @@ export function statusLine(state: AudioState): string {
     case 'on': {
       const r = state.result
       if (!r) return 'Sound is on.'
-      const parts = [r.deviceName, modeWords(r.backend), `${r.bufferFrames} samples`]
+      const parts = [r.deviceName, modeWords(r.backend)]
+      // The rate and format are named together, and only when the engine knows the format.
+      if (r.sampleFormat) parts.push(`${r.sampleRate / 1000} kHz`, r.sampleFormat)
+      parts.push(`${r.bufferFrames} samples`)
       if (r.outputLatencyMs > 0) parts.push(`about ${r.outputLatencyMs.toFixed(1)} ms`)
       return `Sound is on. ${parts.join(', ')}.`
     }
