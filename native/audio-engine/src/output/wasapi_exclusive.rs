@@ -4,14 +4,17 @@
 //! The render loop (`render_loop`) never allocates, locks or logs: buffers are
 //! made before it starts and everything it touches is owned by this thread.
 
-use super::{align_period, device_stalled, f32_to_i16, f32_to_i24_in_i32, f32_to_i32, friendly_hresult, Inbox, OutputDevice, StartInfo};
+use super::{
+    align_period, device_stalled, exclusive_candidates, f32_to_i16, f32_to_i24_in_i32, f32_to_i32, friendly_hresult,
+    native_exclusive_format, shared_period, Inbox, OutputDevice, SampleKind, StartInfo,
+};
 use crate::core::{EngineCore, EngineStats, Mixer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use wasapi::{
     calculate_period_100ns, AudioClient, AudioRenderClient, DeviceEnumerator, Direction, Handle,
-    SampleType, StreamMode, WasapiError, WaveFormat,
+    SampleType, StreamMode, TimingMode, WasapiError, WaveFormat,
 };
 use windows::core::w;
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
@@ -27,24 +30,6 @@ const DEVICE_IN_USE: u32 = 0x8889_000A;
 const EXCLUSIVE_NOT_ALLOWED: u32 = 0x8889_000E;
 /// Longest wait for the device event; also how fast `stop` is noticed.
 const EVENT_WAIT_MS: u32 = 50;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    F32,
-    I16,
-    /// 24 valid bits in a 32-bit container.
-    I24In32,
-    I32,
-}
-
-impl Kind {
-    fn bytes(self) -> usize {
-        match self {
-            Kind::I16 => 2,
-            Kind::F32 | Kind::I24In32 | Kind::I32 => 4,
-        }
-    }
-}
 
 /// Every active render endpoint, once for exclusive and once for shared mode.
 /// Runs on a short-lived thread so COM is set up the way WASAPI wants.
@@ -110,7 +95,7 @@ struct Stream {
     client: AudioClient,
     event: Handle,
     render: AudioRenderClient,
-    kind: Kind,
+    kind: SampleKind,
     channels: u16,
     sample_rate: u32,
     buffer_frames: u32,
@@ -120,7 +105,7 @@ struct Stream {
 
 fn finish(
     client: AudioClient,
-    kind: Kind,
+    kind: SampleKind,
     channels: u16,
     sample_rate: u32,
     device_name: String,
@@ -142,66 +127,131 @@ fn find_device(en: &DeviceEnumerator, id: Option<&str>) -> Result<wasapi::Device
     }
 }
 
+fn wave_format(kind: SampleKind, rate: u32) -> WaveFormat {
+    let rate = rate as usize;
+    match kind {
+        SampleKind::F32 => WaveFormat::new(32, 32, SampleType::Float, rate, 2, None),
+        SampleKind::I16 => WaveFormat::new(16, 16, SampleType::Int, rate, 2, None),
+        SampleKind::I24In32 => WaveFormat::new(32, 24, SampleType::Int, rate, 2, None),
+        SampleKind::I32 => WaveFormat::new(32, 32, SampleType::Int, rate, 2, None),
+    }
+}
+
+/// The format Windows itself uses with this device, when we can write it.
+fn native_format(device: &wasapi::Device) -> Option<(SampleKind, u32)> {
+    let fmt = device.get_device_format().ok()?;
+    let is_float = fmt.get_subformat().ok()? == SampleType::Float;
+    native_exclusive_format(
+        fmt.get_bitspersample(),
+        fmt.get_validbitspersample(),
+        is_float,
+        fmt.get_nchannels(),
+        fmt.get_samplespersec(),
+    )
+}
+
+/// What one try at one exclusive format ended with.
+enum Attempt {
+    Opened(Stream),
+    /// This format does not work: try the next one (the reason is kept).
+    Next(String),
+    /// Stop trying: the device is busy or exclusive mode is not allowed.
+    Stop(String),
+}
+
+fn try_exclusive(device: &wasapi::Device, kind: SampleKind, rate: u32, frames: u32, name: &str) -> Attempt {
+    let mut client = match device.get_iaudioclient() {
+        Ok(c) => c,
+        Err(e) => return Attempt::Stop(explain(&e)),
+    };
+    let Ok(fmt) = client.is_supported_exclusive_with_quirks(&wave_format(kind, rate)) else {
+        return Attempt::Next(friendly_hresult(0x8889_0008));
+    };
+    let minimum = match client.get_device_period() {
+        Ok((_default, minimum)) => minimum,
+        Err(e) => return Attempt::Stop(explain(&e)),
+    };
+    let period = align_period(frames, rate, minimum);
+    let mode = StreamMode::EventsExclusive { period_hns: period };
+    let failure = match client.initialize_client(&fmt, Direction::Render, mode, None) {
+        Ok(()) => return finish_attempt(client, kind, rate, name),
+        Err(e) if hresult_of(&e) == Some(BUFFER_SIZE_NOT_ALIGNED) => {
+            // The device wants a different size: it tells us which, after the
+            // failed call. A client can only be initialised once, so make a
+            // fresh one with the aligned size.
+            let retry = client.get_buffer_size().and_then(|aligned| {
+                let mut again = device.get_iaudioclient()?;
+                let period = calculate_period_100ns(i64::from(aligned), i64::from(rate));
+                let mode = StreamMode::EventsExclusive { period_hns: period };
+                again.initialize_client(&fmt, Direction::Render, mode, None)?;
+                Ok(again)
+            });
+            match retry {
+                Ok(again) => return finish_attempt(again, kind, rate, name),
+                Err(e) => e,
+            }
+        }
+        Err(e) => e,
+    };
+    let code = hresult_of(&failure);
+    let reason = explain(&failure);
+    if code == Some(DEVICE_IN_USE) || code == Some(EXCLUSIVE_NOT_ALLOWED) {
+        Attempt::Stop(reason)
+    } else {
+        Attempt::Next(reason)
+    }
+}
+
+fn finish_attempt(client: AudioClient, kind: SampleKind, rate: u32, name: &str) -> Attempt {
+    match finish(client, kind, 2, rate, name.to_string()) {
+        Ok(stream) => Attempt::Opened(stream),
+        Err(e) => Attempt::Stop(explain(&e)),
+    }
+}
+
 fn open_exclusive(device: &wasapi::Device, frames: u32, name: &str) -> Result<Stream, String> {
     let mut last_reason = friendly_hresult(0x8889_0008);
-    for rate in [48_000usize, 44_100] {
-        for kind in [Kind::F32, Kind::I16, Kind::I24In32, Kind::I32] {
-            let fmt = match kind {
-                Kind::F32 => WaveFormat::new(32, 32, SampleType::Float, rate, 2, None),
-                Kind::I16 => WaveFormat::new(16, 16, SampleType::Int, rate, 2, None),
-                Kind::I24In32 => WaveFormat::new(32, 24, SampleType::Int, rate, 2, None),
-                Kind::I32 => WaveFormat::new(32, 32, SampleType::Int, rate, 2, None),
-            };
-            let mut client = device.get_iaudioclient().map_err(|e| explain(&e))?;
-            let Ok(fmt) = client.is_supported_exclusive_with_quirks(&fmt) else { continue };
-            let (_default, minimum) = client.get_device_period().map_err(|e| explain(&e))?;
-            let period = align_period(frames, rate as u32, minimum);
-            let mode = StreamMode::EventsExclusive { period_hns: period };
-            let init = client.initialize_client(&fmt, Direction::Render, mode, None);
-            let client = match init {
-                Ok(()) => client,
-                Err(e) if hresult_of(&e) == Some(BUFFER_SIZE_NOT_ALIGNED) => {
-                    // The device wants a different size: it tells us which, after
-                    // the failed call. A client can only be initialised once, so
-                    // make a fresh one with the aligned size.
-                    let retry = client.get_buffer_size().and_then(|aligned| {
-                        let mut again = device.get_iaudioclient()?;
-                        let period = calculate_period_100ns(i64::from(aligned), rate as i64);
-                        let mode = StreamMode::EventsExclusive { period_hns: period };
-                        again.initialize_client(&fmt, Direction::Render, mode, None)?;
-                        Ok(again)
-                    });
-                    match retry {
-                        // The first client is not used again; it is dropped when this scope ends.
-                        Ok(again) => again,
-                        Err(e) => {
-                            // Release the first client and try the next format.
-                            let code = hresult_of(&e);
-                            last_reason = explain(&e);
-                            drop(client);
-                            if code == Some(DEVICE_IN_USE) || code == Some(EXCLUSIVE_NOT_ALLOWED) {
-                                return Err(last_reason);
-                            }
-                            continue;
-                        }
-                    }
-                }
-                Err(e) => {
-                    let code = hresult_of(&e);
-                    last_reason = explain(&e);
-                    if code == Some(DEVICE_IN_USE) || code == Some(EXCLUSIVE_NOT_ALLOWED) {
-                        return Err(last_reason);
-                    }
-                    continue;
-                }
-            };
-            return finish(client, kind, 2, rate as u32, name.to_string()).map_err(|e| explain(&e));
+    // The device's own format first: many USB drivers say yes to formats they
+    // do not play well, but always play their own.
+    for (kind, rate) in exclusive_candidates(native_format(device)) {
+        match try_exclusive(device, kind, rate, frames, name) {
+            Attempt::Opened(stream) => return Ok(stream),
+            Attempt::Next(reason) => last_reason = reason,
+            Attempt::Stop(reason) => return Err(reason),
         }
     }
     Err(last_reason)
 }
 
-fn open_shared(device: &wasapi::Device, name: &str) -> Result<Stream, String> {
+/// Shared mode through IAudioClient3: a small period, in the mix format as it is
+/// (no conversion on this path). `None` when the mix format is not 2-channel
+/// 32-bit float or anything fails; the caller then uses the old path.
+fn open_shared_low_delay(device: &wasapi::Device, frames: u32, name: &str) -> Option<Stream> {
+    let mut client = device.get_iaudioclient().ok()?;
+    let mix = client.get_mixformat().ok()?;
+    let rate = mix.get_samplespersec();
+    let is_float = mix.get_subformat().ok()? == SampleType::Float;
+    let wanted = native_exclusive_format(
+        mix.get_bitspersample(),
+        mix.get_validbitspersample(),
+        is_float,
+        mix.get_nchannels(),
+        rate,
+    );
+    if wanted != Some((SampleKind::F32, rate)) {
+        return None;
+    }
+    let p = client.get_shared_mode_engine_period(&mix).ok()?;
+    let period = shared_period(frames, p.default, p.fundamental, p.min, p.max);
+    client.initialize_shared_audio_stream(&mix, TimingMode::Events, period).ok()?;
+    finish(client, SampleKind::F32, 2, rate, name.to_string()).ok()
+}
+
+fn open_shared(device: &wasapi::Device, frames: u32, name: &str) -> Result<Stream, String> {
+    if let Some(stream) = open_shared_low_delay(device, frames, name) {
+        return Ok(stream);
+    }
+    // Today's path: Windows converts to whatever the device uses.
     let mut client = device.get_iaudioclient().map_err(|e| explain(&e))?;
     let mix = client.get_mixformat().map_err(|e| explain(&e))?;
     let rate = mix.get_samplespersec();
@@ -209,7 +259,7 @@ fn open_shared(device: &wasapi::Device, name: &str) -> Result<Stream, String> {
     let fmt = WaveFormat::new(32, 32, SampleType::Float, rate as usize, 2, None);
     let mode = StreamMode::EventsShared { autoconvert: true, buffer_duration_hns: default_period };
     client.initialize_client(&fmt, Direction::Render, mode, None).map_err(|e| explain(&e))?;
-    finish(client, Kind::F32, 2, rate, name.to_string()).map_err(|e| explain(&e))
+    finish(client, SampleKind::F32, 2, rate, name.to_string()).map_err(|e| explain(&e))
 }
 
 /// Puts the calling thread in the "Pro Audio" MMCSS class; undone on drop.
@@ -268,7 +318,7 @@ fn run_with_com(
             if exclusive {
                 open_exclusive(&device, frames, &name)
             } else {
-                open_shared(&device, &name)
+                open_shared(&device, frames, &name)
             }
         });
     let stream = match opened {
@@ -293,6 +343,7 @@ fn run_with_com(
         buffer_frames: stream.buffer_frames,
         output_latency_ms: stream.latency_ms,
         fallback_reason: None,
+        sample_format: stream.kind.label().to_string(),
     };
     let _mmcss = Mmcss::enter();
     let mut buffers = Buffers::new(&stream);
@@ -344,22 +395,22 @@ impl Buffers {
         let width = s.kind.bytes();
         let bytes = &mut self.bytes[..n * width];
         match s.kind {
-            Kind::F32 => {
+            SampleKind::F32 => {
                 for (out, x) in bytes.chunks_exact_mut(4).zip(samples.iter()) {
                     out.copy_from_slice(&x.to_le_bytes());
                 }
             }
-            Kind::I16 => {
+            SampleKind::I16 => {
                 for (out, x) in bytes.chunks_exact_mut(2).zip(samples.iter()) {
                     out.copy_from_slice(&f32_to_i16(*x).to_le_bytes());
                 }
             }
-            Kind::I24In32 => {
+            SampleKind::I24In32 => {
                 for (out, x) in bytes.chunks_exact_mut(4).zip(samples.iter()) {
                     out.copy_from_slice(&f32_to_i24_in_i32(*x).to_le_bytes());
                 }
             }
-            Kind::I32 => {
+            SampleKind::I32 => {
                 for (out, x) in bytes.chunks_exact_mut(4).zip(samples.iter()) {
                     out.copy_from_slice(&f32_to_i32(*x).to_le_bytes());
                 }

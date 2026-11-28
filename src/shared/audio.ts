@@ -18,6 +18,8 @@ export type StartResult = {
   backend: string
   deviceName: string
   sampleRate: number
+  // "16-bit", "24-bit", "32-bit" or "32-bit float"; missing or empty when not known.
+  sampleFormat?: string
   bufferFrames: number
   outputLatencyMs: number
   fallbackReason?: string

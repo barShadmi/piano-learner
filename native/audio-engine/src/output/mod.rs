@@ -50,6 +50,8 @@ pub struct StartInfo {
     pub buffer_frames: u32,
     pub output_latency_ms: f64,
     pub fallback_reason: Option<String>,
+    /// "16-bit", "24-bit", "32-bit" or "32-bit float"; empty when not known.
+    pub sample_format: String,
 }
 
 /// Backend name used when none is given.
@@ -73,6 +75,98 @@ pub fn align_period(frames: u32, sample_rate: u32, min_period_100ns: i64) -> i64
     // The minimum is not a whole number of frames: round up to the next frame.
     let whole_frames = (min_period_100ns * sr + 9_999_999) / 10_000_000;
     (whole_frames * 10_000_000 + sr / 2) / sr
+}
+
+/// The sample formats the Windows exclusive output can write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SampleKind {
+    F32,
+    I16,
+    /// 24 valid bits in a 32-bit container.
+    I24In32,
+    I32,
+}
+
+impl SampleKind {
+    /// Bytes per sample in the buffer handed to the device.
+    pub fn bytes(self) -> usize {
+        match self {
+            SampleKind::I16 => 2,
+            SampleKind::F32 | SampleKind::I24In32 | SampleKind::I32 => 4,
+        }
+    }
+
+    /// Plain words for the Sound screen.
+    pub fn label(self) -> &'static str {
+        match self {
+            SampleKind::I16 => "16-bit",
+            SampleKind::I24In32 => "24-bit",
+            SampleKind::I32 => "32-bit",
+            SampleKind::F32 => "32-bit float",
+        }
+    }
+}
+
+/// Maps the device's own format to one we can write, or `None` (more or fewer
+/// than 2 channels, packed 24-bit, 8-bit, no rate, ...). `valid_bits` 0 means
+/// "same as the container".
+pub fn native_exclusive_format(
+    bits: u16,
+    valid_bits: u16,
+    is_float: bool,
+    channels: u16,
+    rate: u32,
+) -> Option<(SampleKind, u32)> {
+    if channels != 2 || rate == 0 {
+        return None;
+    }
+    let valid = if valid_bits == 0 { bits } else { valid_bits };
+    let kind = match (bits, valid, is_float) {
+        (32, 32, true) => SampleKind::F32,
+        (16, 16, false) => SampleKind::I16,
+        (32, 24, false) => SampleKind::I24In32,
+        (32, 32, false) => SampleKind::I32,
+        _ => return None,
+    };
+    Some((kind, rate))
+}
+
+/// The formats exclusive mode tries, in order: the device's own format first
+/// (drivers play that one best), then integer formats before float, at the
+/// device's own rate, then 48 000, then 44 100. No duplicates.
+pub fn exclusive_candidates(native: Option<(SampleKind, u32)>) -> Vec<(SampleKind, u32)> {
+    const KINDS: [SampleKind; 4] = [SampleKind::I24In32, SampleKind::I16, SampleKind::I32, SampleKind::F32];
+    let mut out: Vec<(SampleKind, u32)> = Vec::with_capacity(13);
+    if let Some(n) = native {
+        out.push(n);
+    }
+    let mut rates = Vec::with_capacity(3);
+    if let Some((_, r)) = native {
+        rates.push(r);
+    }
+    for r in [48_000, 44_100] {
+        if !rates.contains(&r) {
+            rates.push(r);
+        }
+    }
+    for rate in rates {
+        for kind in KINDS {
+            if !out.contains(&(kind, rate)) {
+                out.push((kind, rate));
+            }
+        }
+    }
+    out
+}
+
+/// Period in frames for a low-delay shared stream: the request rounded up to a
+/// whole multiple of the engine's `fundamental`, kept between `min` and `max`.
+/// No request (0) means the engine's `default`.
+pub fn shared_period(requested: u32, default: u32, fundamental: u32, min: u32, max: u32) -> u32 {
+    let wanted = if requested == 0 { default } else { requested };
+    let step = fundamental.max(1);
+    let rounded = wanted.div_ceil(step).saturating_mul(step);
+    rounded.max(min).min(max.max(min))
 }
 
 /// How many device-event timeouts in a row mean the device has stalled.
@@ -807,6 +901,97 @@ mod tests {
     use super::*;
 
     #[test]
+    fn exclusive_candidates_without_a_native_format_put_ints_before_float_at_48k_then_44k() {
+        use SampleKind::*;
+        assert_eq!(
+            exclusive_candidates(None),
+            vec![
+                (I24In32, 48_000), (I16, 48_000), (I32, 48_000), (F32, 48_000),
+                (I24In32, 44_100), (I16, 44_100), (I32, 44_100), (F32, 44_100),
+            ]
+        );
+    }
+
+    #[test]
+    fn exclusive_candidates_try_the_native_format_first_then_its_rate_before_the_others() {
+        use SampleKind::*;
+        let list = exclusive_candidates(Some((I16, 96_000)));
+        assert_eq!(list[0], (I16, 96_000));
+        assert_eq!(&list[1..4], &[(I24In32, 96_000), (I32, 96_000), (F32, 96_000)]);
+        assert_eq!(list[4], (I24In32, 48_000));
+        assert_eq!(list.len(), 1 + 3 + 4 + 4);
+    }
+
+    #[test]
+    fn exclusive_candidates_have_no_duplicates_when_the_native_rate_is_48k_or_44k() {
+        for native in [Some((SampleKind::F32, 48_000)), Some((SampleKind::I24In32, 44_100)), Some((SampleKind::I16, 48_000))] {
+            let list = exclusive_candidates(native);
+            let mut seen = std::collections::HashSet::new();
+            for c in &list {
+                assert!(seen.insert(*c), "duplicate {c:?} in {list:?}");
+            }
+            assert_eq!(list[0], native.unwrap());
+            assert_eq!(list.len(), 8);
+        }
+    }
+
+    #[test]
+    fn native_float_comes_first_even_though_float_is_last_in_the_fixed_list() {
+        let list = exclusive_candidates(Some((SampleKind::F32, 48_000)));
+        assert_eq!(list[0], (SampleKind::F32, 48_000));
+        assert_eq!(list.last(), Some(&(SampleKind::F32, 44_100)));
+    }
+
+    #[test]
+    fn native_exclusive_format_maps_the_four_kinds_with_two_channels() {
+        use SampleKind::*;
+        assert_eq!(native_exclusive_format(32, 32, true, 2, 48_000), Some((F32, 48_000)));
+        assert_eq!(native_exclusive_format(16, 16, false, 2, 44_100), Some((I16, 44_100)));
+        assert_eq!(native_exclusive_format(32, 24, false, 2, 48_000), Some((I24In32, 48_000)));
+        assert_eq!(native_exclusive_format(32, 32, false, 2, 96_000), Some((I32, 96_000)));
+        // A plain (non-extensible) format reports no valid bits: same as the container.
+        assert_eq!(native_exclusive_format(16, 0, false, 2, 48_000), Some((I16, 48_000)));
+    }
+
+    #[test]
+    fn native_exclusive_format_skips_packed_24_bit_more_channels_and_odd_formats() {
+        assert_eq!(native_exclusive_format(24, 24, false, 2, 48_000), None);
+        assert_eq!(native_exclusive_format(16, 16, false, 6, 48_000), None);
+        assert_eq!(native_exclusive_format(16, 16, false, 1, 48_000), None);
+        assert_eq!(native_exclusive_format(16, 16, true, 2, 48_000), None);
+        assert_eq!(native_exclusive_format(32, 32, false, 2, 0), None);
+    }
+
+    #[test]
+    fn sample_kind_labels_are_plain_words() {
+        assert_eq!(SampleKind::I16.label(), "16-bit");
+        assert_eq!(SampleKind::I24In32.label(), "24-bit");
+        assert_eq!(SampleKind::I32.label(), "32-bit");
+        assert_eq!(SampleKind::F32.label(), "32-bit float");
+        assert_eq!(SampleKind::I16.bytes(), 2);
+        assert_eq!(SampleKind::I24In32.bytes(), 4);
+    }
+
+    #[test]
+    fn shared_period_rounds_the_request_up_to_a_multiple_of_the_fundamental() {
+        // 480 fundamental, min 480: 128 frames is below the minimum.
+        assert_eq!(shared_period(128, 480, 480, 480, 4_800), 480);
+        // Fundamental 48, min 128 (a driver with a small step).
+        assert_eq!(shared_period(128, 480, 48, 144, 4_800), 144);
+        assert_eq!(shared_period(512, 480, 48, 144, 4_800), 528);
+        assert_eq!(shared_period(528, 480, 48, 144, 4_800), 528);
+    }
+
+    #[test]
+    fn shared_period_stays_inside_min_and_max_and_uses_default_for_no_request() {
+        assert_eq!(shared_period(100_000, 480, 48, 144, 4_800), 4_800);
+        assert_eq!(shared_period(1, 480, 48, 144, 4_800), 144);
+        assert_eq!(shared_period(0, 480, 48, 144, 4_800), 480);
+        // A zero fundamental from a broken driver does not divide by zero.
+        assert_eq!(shared_period(512, 480, 0, 144, 4_800), 512);
+    }
+
+    #[test]
     fn one_missed_device_event_is_a_glitch_two_in_a_row_is_a_stalled_device() {
         assert!(!device_stalled(0));
         assert!(!device_stalled(1));
@@ -943,6 +1128,7 @@ mod tests {
                     buffer_frames: 128,
                     output_latency_ms: 2.7,
                     fallback_reason: None,
+                    sample_format: String::new(),
                 };
                 let _ = ready.send(Ok(info));
                 while !stop.load(Ordering::Acquire) {
@@ -1111,6 +1297,7 @@ mod tests {
             buffer_frames: 128,
             output_latency_ms: 2.7,
             fallback_reason: None,
+            sample_format: String::new(),
         }
     }
 

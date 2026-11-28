@@ -44,6 +44,40 @@ describe('statusLine', () => {
     ).toBe('Sound is on. Headphones (Realtek), Fastest (exclusive), 128 samples, about 2.7 ms.')
   })
 
+  it('names the sample rate and format when the engine knows them', () => {
+    expect(
+      statusLine({
+        phase: 'on',
+        piano: 'ready',
+        result: {
+          backend: 'wasapi-exclusive',
+          deviceName: 'Headset',
+          sampleRate: 48000,
+          sampleFormat: '16-bit',
+          bufferFrames: 512,
+          outputLatencyMs: 10.7
+        }
+      })
+    ).toBe('Sound is on. Headset, Fastest (exclusive), 48 kHz, 16-bit, 512 samples, about 10.7 ms.')
+  })
+
+  it('shows a rate such as 44.1 kHz without extra zeros', () => {
+    expect(
+      statusLine({
+        phase: 'on',
+        piano: 'ready',
+        result: {
+          backend: 'wasapi-shared',
+          deviceName: 'Speakers',
+          sampleRate: 44100,
+          sampleFormat: '32-bit float',
+          bufferFrames: 480,
+          outputLatencyMs: 0
+        }
+      })
+    ).toBe('Sound is on. Speakers, Shared with other apps, 44.1 kHz, 32-bit float, 480 samples.')
+  })
+
   it('does not claim a delay when it is not known', () => {
     expect(
       statusLine({

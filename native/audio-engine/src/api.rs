@@ -51,6 +51,8 @@ pub struct JsStartResult {
     pub buffer_frames: u32,
     pub output_latency_ms: f64,
     pub fallback_reason: Option<String>,
+    /// "16-bit", "24-bit", "32-bit" or "32-bit float" ("" = not known).
+    pub sample_format: String,
 }
 
 #[napi(object, js_name = "EngineStatus")]
@@ -103,6 +105,7 @@ impl Task for StartTask {
             buffer_frames: info.buffer_frames,
             output_latency_ms: info.output_latency_ms,
             fallback_reason: info.fallback_reason,
+            sample_format: info.sample_format,
         })
     }
 }

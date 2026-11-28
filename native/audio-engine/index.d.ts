@@ -186,6 +186,8 @@ export interface StartResult {
   bufferFrames: number
   outputLatencyMs: number
   fallbackReason?: string
+  /** "16-bit", "24-bit", "32-bit" or "32-bit float" ("" = not known). */
+  sampleFormat: string
 }
 
 /** What the engine is doing now. */

@@ -256,6 +256,7 @@ fn open_stream(
         buffer_frames,
         output_latency_ms: f64::from(buffer_frames) * 1000.0 / f64::from(sample_rate),
         fallback_reason: None,
+        sample_format: String::new(),
     };
     Ok((stream, info))
 }
